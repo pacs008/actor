@@ -1,4 +1,3 @@
-// routeBuilder
 package actor
 
 // import (
@@ -35,7 +34,7 @@ func (rb *routeBuilder) Run() (*ActorRef, error) {
 	a := Actor{
 		rb.as,
 		make(chan ActorMsg, 10),
-		func(ac ActorContext, am ActorMsg) { // doFunc
+		func(ac *Actor, am ActorMsg) { // doFunc
 			for _, route := range rb.routes {
 				ref := route(am.Data())
 				if ref != nil {
@@ -45,8 +44,8 @@ func (rb *routeBuilder) Run() (*ActorRef, error) {
 			}
 			rb.as.ToDeadLetter(am)
 		},
-		func(ActorContext) {}, // enterFn
-		func(ActorContext) {}, // exitFn
+		func(*Actor) {}, // enterFn
+		func(*Actor) {}, // exitFn
 		mainLoop,
 		rb.name,
 		0,

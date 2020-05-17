@@ -1,4 +1,3 @@
-// eventBus
 package actor
 
 import (
@@ -27,6 +26,11 @@ type subscriber struct {
 	filter   func(interface{}) bool
 }
 
+// Event bus is a pub-sub mechanism
+type EventBus struct {
+	eventBus
+}
+
 // event bus - not much to it really!
 type eventBus struct {
 	sync.Mutex
@@ -35,15 +39,19 @@ type eventBus struct {
 }
 
 func NewBusEvent(topic string, msg interface{}, caller *ActorRef) BusEvent {
-	return busEvent{newActorMsg(MsgTypeEvent, msg, caller), time.Now(), topic}
+	return busEvent{
+		newActorMsg(MsgTypeEvent, msg, caller),
+		time.Now(),
+		topic,
+	}
 }
 
-func NewEventBus(filter func(interface{}) bool) eventBus {
-	return eventBus{filter: filter, subscribers: make([]subscriber, 0)}
+func NewEventBus(filter func(interface{}) bool) EventBus {
+	return EventBus{eventBus{filter: filter, subscribers: make([]subscriber, 0)}}
 }
 
 // subscribe an actor to the event bus
-func (bus *eventBus) Subscribe(ar *ActorRef, pattern string, filter func(interface{}) bool) error {
+func (bus *EventBus) Subscribe(ar *ActorRef, pattern string, filter func(interface{}) bool) error {
 	bus.Lock()
 	defer bus.Unlock()
 	found := false
@@ -68,7 +76,7 @@ func (bus *eventBus) Subscribe(ar *ActorRef, pattern string, filter func(interfa
 }
 
 // unsubscribe the actor from the event bus
-func (bus *eventBus) Unsubscribe(ar *ActorRef) {
+func (bus *EventBus) Unsubscribe(ar *ActorRef) {
 	bus.Lock()
 	defer bus.Unlock()
 	found := false
@@ -86,7 +94,7 @@ func (bus *eventBus) Unsubscribe(ar *ActorRef) {
 }
 
 // publish to all subscribers
-func (bus *eventBus) Publish(topic string, msg interface{}) error {
+func (bus *EventBus) Publish(topic string, msg interface{}) error {
 	be := NewBusEvent(topic, msg, nil)
 	if bus.filter != nil && !bus.filter(msg) {
 		return fmt.Errorf("Wrong message type for bus")

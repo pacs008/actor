@@ -1,4 +1,3 @@
-// builder
 package actor
 
 import (
@@ -6,64 +5,78 @@ import (
 	// "log"
 )
 
-type ActorBuilder interface {
-	Run() (*ActorRef, error)
-	WithEnter(func(ActorContext)) ActorBuilder
-	WithExit(func(ActorContext)) ActorBuilder
-	WithPool(int) ActorBuilder
+// ActorBuilder is used to build and
+// decorate actors. An ActorBuilder instance
+// is created by calling ActorSystem.BuildActor.
+type ActorBuilder struct {
+	actorBuilder
 }
+
+// Data required by concrete
+// actor builder.
 type actorBuilder struct {
 	as    *ActorSystem
 	actor *Actor
 	err   error
 }
 
-func (as *ActorSystem) BuildActor(name string, doFunc func(ActorContext, ActorMsg)) ActorBuilder {
+// Build a basic actor with a message handling function. The
+// actor invokes the message handling function when it reads
+// a message from its mailbox.
+func (as *ActorSystem) BuildActor(name string, doFunc func(*Actor, ActorMsg)) *ActorBuilder {
 	a := Actor{
 		as,
 		make(chan ActorMsg, 10),
 		doFunc,
-		func(ActorContext) {}, // enter
-		func(ActorContext) {}, // exit
+		func(*Actor) {}, // enter
+		func(*Actor) {}, // exit
 		mainLoop,
 		name,
 		0,
 		false,
 	}
 	err := a.validName()
-	return &actorBuilder{
-		as,
-		&a,
-		err,
-	}
+	return &ActorBuilder{
+		actorBuilder{
+			as,
+			&a,
+			err,
+		}}
 }
 
-// add enter function to actor
-func (b actorBuilder) WithEnter(enterFunc func(ActorContext)) ActorBuilder {
+// Add an enter function to the actor. The enter function
+// gets called once when the actor starts.
+func (b *ActorBuilder) WithEnter(enterFunc func(*Actor)) *ActorBuilder {
 	if b.err == nil {
 		b.actor.enterFunc = enterFunc
 	}
 	return b
 }
 
-// add exit function to actor
-func (b actorBuilder) WithExit(exitFunc func(ActorContext)) ActorBuilder {
+// Add an exit function to the actor. The exit function
+// gets called once when the actor exits.
+func (b *ActorBuilder) WithExit(exitFunc func(*Actor)) *ActorBuilder {
 	if b.err == nil {
 		b.actor.exitFunc = exitFunc
 	}
 	return b
 }
 
-// hidden actor (private method)
-func (b actorBuilder) withHidden() ActorBuilder {
+// Private method to exclude an actor from the
+// actor system directory. Can be used to create
+// transient actors.
+func (b *ActorBuilder) withHidden() *ActorBuilder {
 	if b.err == nil {
 		b.actor.hidden = true
 	}
 	return b
 }
 
-// turn a single actor into a pool
-func (b actorBuilder) WithPool(num int) ActorBuilder {
+// Turn an actor into a pool. When the actor starts,
+// N copies of the actor are created. When a message
+// is read from the actor's mailbox it is assigned
+// to one of the copies on a round robin basis.
+func (b *ActorBuilder) WithPool(num int) *ActorBuilder {
 	if b.err != nil {
 		return b
 	}
@@ -80,7 +93,7 @@ func (b actorBuilder) WithPool(num int) ActorBuilder {
 		b.as,
 		make(chan ActorMsg, 10),
 		// 'do' function loops round actors
-		func(ac ActorContext, am ActorMsg) {
+		func(ac *Actor, am ActorMsg) {
 			pool[idx].mailbox <- am
 			idx++
 			if idx >= len(pool) {
@@ -88,9 +101,9 @@ func (b actorBuilder) WithPool(num int) ActorBuilder {
 			}
 		},
 		nil, // enter
-		func(ActorContext) { // on exit, kill theworkers
+		func(*Actor) { // on exit, kill theworkers
 			for _, a := range pool {
-				a.Self().SendMsg(newActorMsg(MsgTypePoison, "", nil))
+				a.Ref().SendMsg(newActorMsg(MsgTypePoison, "", nil))
 			}
 		},
 		// main loops starts worker loops before starting its own
@@ -123,8 +136,11 @@ func (b actorBuilder) WithPool(num int) ActorBuilder {
 	return b
 }
 
-// last call in chain - start it up
-func (b actorBuilder) Run() (*ActorRef, error) {
+// This must be the last call in the builder chain.
+// It registers the actor in the actor system
+// directory, calls the actor entry function, and
+// starts the actor reading from its mailbox.
+func (b *actorBuilder) Run() (*ActorRef, error) {
 	if b.err != nil {
 		return nil, b.err
 	}

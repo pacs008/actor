@@ -1,4 +1,3 @@
-// mux2Builder
 package actor
 
 import (
@@ -28,7 +27,7 @@ func (as *ActorSystem) BuildMux(name string, initFunc func(chan<- []byte) chan [
 				0,
 				false,
 			},
-			make(map[string]CacheEntry), // cache
+			make(map[string]cacheEntry), // cache
 			initFunc,
 			nil, // kb key builder
 			func(_ interface{}) bool { return false }, // reqPassThru

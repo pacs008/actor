@@ -1,34 +1,49 @@
-// actor project actor.go
 package actor
 
 import (
 	"fmt"
-	// "log"
 	"time"
 
 	log "github.com/sirupsen/logrus"
 )
 
-// basic actor
+// Actor is the core of the actor package. It is
+// created by an ActorBuilder. An actor does not have
+// any methods accessible from outside; it can only
+// be accessed by passing messages to its ActorRef.
+//
+// An Actor runs in its own goroutine. It processes
+// messages that it receives in its mailbox by
+// calling the message handling function. It can
+// communicate with other actors by sending messages
+// or calling them. References of the actors to
+// communicate with can be obtained by name from the
+// actor system directory.
 type Actor struct {
 	as        *ActorSystem
 	mailbox   chan ActorMsg
-	doFunc    func(ActorContext, ActorMsg)
-	enterFunc func(ActorContext)
-	exitFunc  func(ActorContext)
-	loopFunc  func(a *Actor)
+	doFunc    func(*Actor, ActorMsg)
+	enterFunc func(*Actor)
+	exitFunc  func(*Actor)
+	loopFunc  func(*Actor)
 	name      string
 	instance  int
 	hidden    bool
 }
 
-// create an actor in the system
-// convenience method without calling builder
-func (as *ActorSystem) NewActor(name string, doFunc func(ActorContext, ActorMsg)) (*ActorRef, error) {
+// Create an actor in the system. This is a
+// convenience method to create an actor
+// without calling ActorBuilder.
+func (as *ActorSystem) NewActor(name string, doFunc func(*Actor, ActorMsg)) (*ActorRef, error) {
 	return as.BuildActor(name, doFunc).Run()
 }
 
-// can't make this a method because we need to use it in constructor
+// This is the main loop that reads messages from the
+// actor mailbox and invokes the message handler.
+// We can't make this a method because we need to use
+// it in constructor.
+// If the message is a poison message it is intercepted,
+// the exit function is called and the actor terminates.
 func mainLoop(a *Actor) {
 	// read messages forever and pass
 	// to the doFunction
@@ -46,14 +61,18 @@ func mainLoop(a *Actor) {
 	}
 }
 
-// handle panics
-func protect(a ActorContext, m ActorMsg, doFunc func(a ActorContext, m ActorMsg)) {
+// Function to handle panics thrown by an actor. The message
+// that was being handled is written to the Dead Letter Queue
+// and the actor continues with processing the next message.
+// Note: if the DLQ also panics (which should not be possible),
+// the actor dies.
+func protect(a *Actor, m ActorMsg, doFunc func(a *Actor, m ActorMsg)) {
 	defer func() {
 		// log.Debug("protect checking recover") // Println executes normally even if there is a panic
 		if x := recover(); x != nil {
 			log.Debugf("%v caught panic: %v", a.Name(), x)
 			if a.Name() == "dlq" {
-				log.Fatalf("Urgh! DLQ loop -= really dying")
+				log.Fatalf("Urgh! DLQ loop - really dying")
 			}
 			a.ActorSystem().ToDeadLetter(m) // would be good to wrap this with a message
 		}
@@ -63,48 +82,10 @@ func protect(a ActorContext, m ActorMsg, doFunc func(a ActorContext, m ActorMsg)
 	// log.Debug("protect returned doFunc")
 }
 
-// get the handle for this actor
-func (a *Actor) Self() *ActorRef {
-	return &ActorRef{a.ActorSystem(), &a.mailbox, a.name}
-}
-
-// get the name for this actor
-func (a *Actor) Name() string {
-	return a.name
-}
-
-func (a *Actor) Instance() int {
-	return a.instance
-}
-
-// send self a message after specified duration
-func (a *Actor) After(d time.Duration, data interface{}) {
-	go func() {
-		<-time.After(d)
-		a.mailbox <- NewActorMsg(data, nil)
-	}()
-}
-
-// send self a message every specified duration
-func (a *Actor) Every(d time.Duration, data interface{}) {
-	go func() {
-		ticker := time.Tick(d)
-		for {
-			<-ticker
-			a.mailbox <- NewActorMsg(data, nil)
-		}
-	}()
-}
-
-// get the ActorSystem
-func (a Actor) ActorSystem() *ActorSystem {
-	return a.as
-}
-
 // run the actor
 func (a Actor) run(as *ActorSystem) (*ActorRef, error) {
 	if !a.hidden {
-		err := as.register(a.Self())
+		err := as.register(a.Ref())
 		if err != nil {
 			log.Error(err)
 			return nil, err
@@ -116,10 +97,10 @@ func (a Actor) run(as *ActorSystem) (*ActorRef, error) {
 		a.enterFunc(&a)
 	}
 	// log.Debugf("Running %v.mainLoop", a.name)
-	as.sysBus.Publish(ACTOR_LIFECYCLE, a.name+" running")
+	as.sysBus.Publish(ActorLifecycle, a.name+" running")
 	go a.loopFunc(&a) // mainLoop(&a)
 
-	return a.Self(), nil
+	return a.Ref(), nil
 }
 
 // check valid name
@@ -132,9 +113,49 @@ func (a Actor) validName() error {
 	return err
 }
 
-// clone an actor with a new name
-func (a Actor) Clone(name string) Actor {
-	b := a
-	b.name = name
-	return b
+// Get the ActorRef for this actor - used to set Sender in messages.
+func (a *Actor) Ref() *ActorRef {
+	return &ActorRef{a.ActorSystem(), &a.mailbox, a.name}
+}
+
+// Get the name for this actor.
+func (a *Actor) Name() string {
+	return a.name
+}
+
+// Get the instance number for this actor (used when
+// the actor is a member of a pool).
+func (a *Actor) Instance() int {
+	return a.instance
+}
+
+// Send self a message after the specified duration. This
+// fires one-off.
+func (a *Actor) After(d time.Duration, data interface{}) {
+	go func() {
+		<-time.After(d)
+		a.mailbox <- NewActorMsg(data, nil)
+	}()
+}
+
+// Send self a message every specified duration. This
+// fires repeatedly.
+func (a *Actor) Every(d time.Duration, data interface{}) {
+	go func() {
+		ticker := time.Tick(d)
+		for {
+			<-ticker
+			a.mailbox <- NewActorMsg(data, nil)
+		}
+	}()
+}
+
+// Get the ActorSystem in which the actor is running.
+func (a *Actor) ActorSystem() *ActorSystem {
+	return a.as
+}
+
+// Get the UserData for the ActorSystem in which the actor is running.
+func (a *Actor) UserData() interface{} {
+	return a.as.UserData()
 }

@@ -1,4 +1,3 @@
-// actorSystem
 package actor
 
 import (
@@ -8,26 +7,32 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// Topics on the System Message Bus
 const (
-	ACTOR_LIFECYCLE = "actor_lifecycle"
+	ActorLifecycle = "actor_lifecycle"
 )
 
 // the parent of all actors
 type ActorSystem struct {
 	actors map[string]*ActorRef
-	sysBus eventBus
+	sysBus EventBus
 	dlq    *ActorRef
 	sync.Mutex
+	userData interface{}
 }
 
 // create an actor system
-func NewActorSystem() *ActorSystem {
-	as := &ActorSystem{actors: make(map[string]*ActorRef)}
+func NewActorSystem(userData interface{}) *ActorSystem {
+	as := &ActorSystem{actors: make(map[string]*ActorRef), userData: userData}
 	// create the dead letter queue
-	ar, _ := as.BuildActor("dlq", func(_ ActorContext, msg ActorMsg) {
+	ar, _ := as.BuildActor("dlq", func(_ *Actor, msg ActorMsg) {
+		name := "<nil>"
+		if msg.Sender() != nil {
+			name = msg.Sender().name
+		}
 		log.WithFields(log.Fields{
 			"reason": "DLQ",
-			"source": msg.Sender().name,
+			"source": name,
 		}).Error(msg.Data())
 		for true {
 			if msg = msg.Unwrap(); msg == nil {
@@ -39,9 +44,8 @@ func NewActorSystem() *ActorSystem {
 			}).Error(msg.Data())
 		}
 	}).
-	(*actorBuilder).
-	withHidden(). // hide it
-	Run()
+		withHidden(). // hide it
+		Run()
 
 	as.dlq = ar
 
@@ -61,7 +65,7 @@ func (as *ActorSystem) register(ar *ActorRef) error {
 	as.actors[ar.name] = ar
 	as.Unlock()
 
-	as.sysBus.Publish(ACTOR_LIFECYCLE, ar.name+" registered")
+	as.sysBus.Publish(ActorLifecycle, ar.name+" registered")
 
 	return nil
 }
@@ -72,7 +76,7 @@ func (as *ActorSystem) unregister(name string) {
 	delete(as.actors, name)
 	as.Unlock()
 
-	as.sysBus.Publish(ACTOR_LIFECYCLE, name+" unregistered")
+	as.sysBus.Publish(ActorLifecycle, name+" unregistered")
 }
 
 // get an actor ref by name
@@ -104,6 +108,11 @@ func (as *ActorSystem) ToDeadLetter(msg ActorMsg) {
 }
 
 // get the system bus
-func (as *ActorSystem) SystemBus() *eventBus {
+func (as *ActorSystem) SystemBus() *EventBus {
 	return &as.sysBus
+}
+
+// get the user data
+func (as *ActorSystem) UserData() interface{} {
+	return as.userData
 }

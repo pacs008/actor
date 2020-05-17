@@ -1,4 +1,3 @@
-// actorCall
 package actor
 
 import (
@@ -7,11 +6,12 @@ import (
 	// log "github.com/sirupsen/logrus"
 )
 
-type CallRequest interface {
-	ActorMsg
-	Method() string
-	Parameters() interface{}
-	CallResponse(data interface{}, err error)
+// CallRequest is a special type of ActorMsg used
+// to make a synchronous call to another actor.
+// The receiving actor must use the message's
+// CallResponse method to reply.
+type CallRequest struct {
+	callRequest
 }
 
 type callRequest struct {
@@ -25,9 +25,17 @@ type callResponse struct {
 	err     error
 }
 
-func (ar *ActorRef) Call(method string, req interface{}, timeoutMs int) (interface{}, error) {
-	reqMsg := callRequest{newActorMsg(MsgTypeCall, req, nil), method, make(chan interface{})}
-	ar.SendMsg(reqMsg)
+// Call makes a synchronous call to another actor by sending a
+// CallRequest message to to it. The receiving actor must reply
+// by calling the CallRequest.CallResponse method.
+func (ref *ActorRef) Call(method string,
+	req interface{},
+	timeoutMs int) (interface{}, error) {
+	reqMsg := CallRequest{
+		callRequest{newActorMsg(MsgTypeCall, req, nil),
+			method,
+			make(chan interface{})}}
+	ref.SendMsg(reqMsg)
 	timer := time.NewTimer(time.Duration(timeoutMs) * time.Millisecond)
 	defer close(reqMsg.replyChan)
 	defer timer.Stop()
@@ -40,23 +48,28 @@ func (ar *ActorRef) Call(method string, req interface{}, timeoutMs int) (interfa
 		// OK it's some unstructured stuff
 		return rsp, nil
 	case <-timer.C:
-		return nil, fmt.Errorf("Call to %v timed out (%v ms)", ar.name, timeoutMs)
+		return nil, fmt.Errorf("Call to %v timed out (%v ms)", ref.name, timeoutMs)
 	}
 }
 
-// call method is the data; parameters are the wrapped data
-func (req callRequest) Method() string {
+// The method for the call. It is the responsibility
+// of the receiving actor to dispatch the call
+// appropriately.
+func (req CallRequest) Method() string {
 	return req.method
 }
-func (req callRequest) Parameters() interface{} {
+
+// Parameters is a synonym for ActorMsg.Data
+func (req CallRequest) Parameters() interface{} {
 	return req.Data()
 }
 
-// reply to a Call
-func (msg callRequest) CallResponse(data interface{}, err error) {
+// CallResponse method must be called to respond
+// to the call.
+func (req CallRequest) CallResponse(data interface{}, err error) {
 	// TODO should send to DLQ if IsNoreply but we don't have ActorSystem
 	// if msg.sender.IsNoreply() {
 	// 	SEND TO DLQ
 	// }
-	msg.replyChan <- callResponse{data, err}
+	req.replyChan <- callResponse{data, err}
 }

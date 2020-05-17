@@ -1,3 +1,5 @@
+package actor
+
 // mux
 // An actor that receives requests from multiple callers.
 // It stores the payload of the request along with the
@@ -14,7 +16,6 @@
 // This version takes an initializer function that takes an inout
 // channel and returns an output channel
 //
-package actor
 
 import (
 	// "fmt"
@@ -24,7 +25,7 @@ import (
 )
 
 // Messages pending response
-type CacheEntry struct {
+type cacheEntry struct {
 	ttl  time.Time // time to expire message
 	data ActorMsg  // payload
 }
@@ -32,7 +33,7 @@ type CacheEntry struct {
 // main mux structure
 type Mux struct {
 	Actor
-	cache            map[string]CacheEntry // cache of pending messages
+	cache            map[string]cacheEntry // cache of pending messages
 	initFunc         func(chan<- []byte) chan []byte
 	kb               func(interface{}) string // function to build key
 	reqPassthru      func(interface{}) bool   // function to pass thru req without cache
@@ -70,7 +71,7 @@ func (mux *Mux) muxDo() bool {
 		// log.Debug(mux.Name() + " read mailbox " + string(msg.data.([]byte)))
 		if !mux.reqPassthru(msg.Data()) { // if not passthru then cache
 			key := mux.kb(msg.Data())
-			mux.cache[key] = CacheEntry{
+			mux.cache[key] = cacheEntry{
 				time.Now().Add(time.Duration(mux.timeout) * time.Millisecond),
 				msg,
 			}
@@ -91,7 +92,7 @@ func (mux *Mux) muxDo() bool {
 				cache.data.Reply(rsp, nil)
 			} else {
 				log.Infof("Key %v not found - send to DLQ", key)
-				mux.as.ToDeadLetter(NewActorMsg(rsp, mux.Self()))
+				mux.as.ToDeadLetter(NewActorMsg(rsp, mux.Ref()))
 			}
 		}
 	}
@@ -114,7 +115,7 @@ func (mux *Mux) purge() {
 
 // run the mux
 func (mux Mux) run(as *ActorSystem) (*ActorRef, error) {
-	err := as.register(mux.Self())
+	err := as.register(mux.Ref())
 	if err != nil {
 		log.Error(err)
 		return nil, err
@@ -123,7 +124,7 @@ func (mux Mux) run(as *ActorSystem) (*ActorRef, error) {
 	mux.rspChan = mux.initFunc(mux.reqChan)
 	go mux.muxLoop() // mainLoop(&a)
 
-	return mux.Self(), nil
+	return mux.Ref(), nil
 }
 
 // handle panics
