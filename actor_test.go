@@ -16,26 +16,31 @@ import (
 func TestMsg(t *testing.T) {
 	log.SetLevel(log.DebugLevel)
 
-	m := NewActorMsg("Top Level", nil)
+	wrapped := "wrapped"
+	m := NewActorMsg(wrapped, nil)
 
-	log.Infof("m = %v", m)
+	wrapper := "wrapper"
+	m = m.Wrap(wrapper, nil)
 
-	m = m.Wrap("Now wrapped", nil)
-
-	i := 0
-	for true {
-		log.Infof("i = %v m = %v", i, m)
-		i++
-		if m = m.Unwrap(); m == nil {
-			break
-		}
+	if m.Data() != wrapper {
+		t.Errorf("expected %v, got %v", wrapper, m.Data())
+	}
+	m = m.Unwrap()
+	if m == nil {
+		t.Errorf("expected %v, got %v", wrapped, m)
+	} else if m.Data() != wrapped {
+		t.Errorf("expected %v, got %v", wrapped, m.Data())
+	}
+	m = m.Unwrap()
+	if m != nil {
+		t.Errorf("expected nil, got %v", m)
 	}
 }
 
 // test the dead letter queue
 func TestDLQ(t *testing.T) {
 	log.SetLevel(log.DebugLevel)
-	as := NewActorSystem(nil)
+	as := NewActorSystem()
 
 	as.ToDeadLetter(NewActorMsg("Dead as a doornail", nil))
 }
@@ -47,7 +52,7 @@ func TestActor(t *testing.T) {
 		world string
 	}
 	log.SetLevel(log.DebugLevel)
-	as := NewActorSystem(&userType{"world"})
+	as := BuildActorSystem().WithUserData(&userType{"world"}).Run()
 	ch := make(chan string, 0)
 
 	fn := func(ac *Actor, msg ActorMsg) {
@@ -83,7 +88,7 @@ func TestActor(t *testing.T) {
 // TestCallError
 func TestCallError(t *testing.T) {
 	log.SetLevel(log.DebugLevel)
-	as := NewActorSystem(nil)
+	as := NewActorSystem()
 	ch := make(chan string, 0)
 
 	aRsp, err := as.NewActor("aRsp", func(ac *Actor, msg ActorMsg) {
@@ -132,7 +137,7 @@ func TestCallError(t *testing.T) {
 // other, which replies to the first
 func TestReqRsp(t *testing.T) {
 	log.SetLevel(log.DebugLevel)
-	as := NewActorSystem(nil)
+	as := NewActorSystem()
 	ch := make(chan string, 0)
 
 	// create a pair of actors
@@ -172,7 +177,7 @@ func TestReqRsp(t *testing.T) {
 // test an actor with After
 func TestAfter(t *testing.T) {
 	log.SetLevel(log.DebugLevel)
-	as := NewActorSystem(nil)
+	as := NewActorSystem()
 	ch := make(chan string, 0)
 
 	// create an actor with after
@@ -194,7 +199,7 @@ func TestAfter(t *testing.T) {
 // test an actor with Every
 func TestEvery(t *testing.T) {
 	log.SetLevel(log.DebugLevel)
-	as := NewActorSystem(nil)
+	as := NewActorSystem()
 	ch := make(chan string, 0)
 
 	// create an actor with every
@@ -217,7 +222,7 @@ func TestEvery(t *testing.T) {
 // test event bus
 func TestEventBus(t *testing.T) {
 	log.SetLevel(log.DebugLevel)
-	as := NewActorSystem(nil)
+	as := NewActorSystem()
 
 	eb := NewEventBus(func(data interface{}) bool {
 		_, ok := data.(string)
@@ -302,7 +307,7 @@ func TestEventBus(t *testing.T) {
 // test round robin pool
 func TestRobin(t *testing.T) {
 	log.SetLevel(log.DebugLevel)
-	as := NewActorSystem(nil)
+	as := NewActorSystem()
 	ch := make(chan string, 0)
 
 	// create an actor with every
@@ -329,7 +334,7 @@ func TestRobin(t *testing.T) {
 // use example rather than test just for a change!
 func ExampleRouter() {
 	log.SetLevel(log.DebugLevel)
-	as := NewActorSystem(nil)
+	as := NewActorSystem()
 	ch := make(chan string, 0)
 	// check that we can make an actor loop function
 	// by closing over local variables
@@ -373,7 +378,7 @@ func ExampleRouter() {
 // test mux
 func TestMux(t *testing.T) {
 	log.SetLevel(log.DebugLevel)
-	as := NewActorSystem(nil)
+	as := NewActorSystem()
 
 	// Init function acts like a mock
 	// Copy request channel to response, appending

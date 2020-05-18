@@ -12,7 +12,7 @@ func BenchmarkLocalHello(b *testing.B) {
 }
 
 func BenchmarkRemoteHello(b *testing.B) {
-	as := NewActorSystem(nil)
+	as := NewActorSystem()
 	server, _ := as.NewActor("greeter", func(ac *Actor, msg ActorMsg) {
 		call := msg.(CallRequest)
 		call.CallResponse(call.Parameters().(string)+"X", nil)

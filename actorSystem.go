@@ -3,8 +3,6 @@ package actor
 import (
 	"fmt"
 	"sync"
-
-	log "github.com/sirupsen/logrus"
 )
 
 // Topics on the System Message Bus
@@ -22,37 +20,8 @@ type ActorSystem struct {
 }
 
 // create an actor system
-func NewActorSystem(userData interface{}) *ActorSystem {
-	as := &ActorSystem{actors: make(map[string]*ActorRef), userData: userData}
-	// create the dead letter queue
-	ar, _ := as.BuildActor("dlq", func(_ *Actor, msg ActorMsg) {
-		name := "<nil>"
-		if msg.Sender() != nil {
-			name = msg.Sender().name
-		}
-		log.WithFields(log.Fields{
-			"reason": "DLQ",
-			"source": name,
-		}).Error(msg.Data())
-		for true {
-			if msg = msg.Unwrap(); msg == nil {
-				break
-			}
-			log.WithFields(log.Fields{
-				"reason": "DLQ (wrapped)",
-				"source": msg.Sender().name,
-			}).Error(msg.Data())
-		}
-	}).
-		withHidden(). // hide it
-		Run()
-
-	as.dlq = ar
-
-	// create the system event bus
-	as.sysBus = NewEventBus(nil)
-
-	return as
+func NewActorSystem() *ActorSystem {
+	return BuildActorSystem().Run()
 }
 
 // register the actor
