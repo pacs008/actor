@@ -34,13 +34,13 @@ type cacheEntry struct {
 type Mux struct {
 	Actor
 	cache            map[string]cacheEntry // cache of pending messages
-	initFunc         func(chan<- []byte) chan []byte
+	initFunc         func(<-chan []byte) chan []byte
 	kb               func(interface{}) string // function to build key
 	reqPassthru      func(interface{}) bool   // function to pass thru req without cache
 	rspPassthru      func(interface{}) bool   // function to pass thru rsp without cache
 	passthruRspActor ActorRef                 // actor to passthru responses to
-	reqChan          chan<- []byte            // channel to pass requests to underlying resource
-	rspChan          <-chan []byte            // channel to receive responses from underlying resource
+	fromResChan      chan []byte              // channel to receive responses from underlying resource
+	toResChan        chan []byte              // channel to pass requests to underlying resource
 	tick             <-chan time.Time
 	timeout          int
 }
@@ -76,22 +76,22 @@ func (mux *Mux) muxDo() bool {
 				msg,
 			}
 		}
-		// log.Debug(mux.Name() + " writing reqChannel " + string(msg.data.([]byte)))
-		mux.reqChan <- msg.Data().([]byte)
-		// log.Debug(mux.Name() + " wrote reqChannel " + string(msg.data.([]byte)))
+		// log.Debug(mux.Name() + " writing toResChan " + string(msg.Data().([]byte)))
+		mux.toResChan <- msg.Data().([]byte)
+		// log.Debug(mux.Name() + " wrote toResChan " + string(msg.Data().([]byte)))
 	// a message back from the embedded resource
-	case rsp := <-mux.rspChan:
-		log.Debug(mux.Name() + " read rspMailbox " + string(rsp))
+	case rsp := <-mux.fromResChan:
+		// log.Debug(mux.Name() + " read fromResChan " + string(rsp))
 		if mux.reqPassthru(rsp) { // if passthru then just send
 			mux.passthruRspActor.Send(rsp, nil)
 		} else { // if not passthru then look in cache
 			key := mux.kb(rsp)
 			if cache, ok := mux.cache[key]; ok {
 				delete(mux.cache, key)
-				log.Debug(mux.Name() + " Replying " + string(rsp))
+				// log.Debug(mux.Name() + " Replying " + string(rsp))
 				cache.data.Reply(rsp, nil)
 			} else {
-				log.Infof("Key %v not found - send to DLQ", key)
+				// log.Infof("Key %v not found - send to DLQ", key)
 				mux.as.ToDeadLetter(NewActorMsg(rsp, mux.Ref()))
 			}
 		}
@@ -104,7 +104,7 @@ func (mux *Mux) purge() {
 	now := time.Now()
 	for key, cache := range mux.cache {
 		if now.After(cache.ttl) {
-			// cache.data.Reply(cache.data.Data(), TimeoutActorRef())
+			// log.Infof("%v sending timeout to %v (%v)", mux.Name(), cache.data.Sender().Name(), cache.data.Data())
 			cache.data.Sender().SendMsg(actorMsg{MsgTypeTimeout,
 				cache.data.Data(),
 				nil, nil})
@@ -121,7 +121,7 @@ func (mux Mux) run(as *ActorSystem) (*ActorRef, error) {
 		return nil, err
 	}
 
-	mux.rspChan = mux.initFunc(mux.reqChan)
+	mux.fromResChan = mux.initFunc(mux.toResChan)
 	go mux.muxLoop() // mainLoop(&a)
 
 	return mux.Ref(), nil

@@ -76,12 +76,19 @@ func (as *ActorSystem) ToDeadLetter(msg ActorMsg) {
 	as.dlq.Forward(msg)
 }
 
-// get the system bus
+// Get the system bus. This is a special bus that publishes
+// actor lifecycle events:
+// registered
+// enterFunc
+// running
+// exitFunc
+// unregistered
+// caught panic
 func (as *ActorSystem) SystemBus() *EventBus {
 	return &as.sysBus
 }
 
 // get the user data
-func (as *ActorSystem) UserData() interface{} {
+func (as *ActorSystem) SystemData() interface{} {
 	return as.userData
 }

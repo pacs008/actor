@@ -28,8 +28,8 @@ func (as *ActorSystem) BuildActor(name string, doFunc func(*Actor, ActorMsg)) *A
 		as,
 		make(chan ActorMsg, 10),
 		doFunc,
-		func(*Actor) {}, // enter
-		func(*Actor) {}, // exit
+		nil, //func(*Actor) {}, // enter
+		nil, //func(*Actor) {}, // exit
 		mainLoop,
 		name,
 		0,

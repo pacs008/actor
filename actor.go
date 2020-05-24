@@ -52,7 +52,10 @@ func mainLoop(a *Actor) {
 		// check for poison
 		if msg.IsPoison() { //msg.Sender().IsPoison() {
 			// log.Info(a.Name() + " swallowed poison - exiting")
-			a.exitFunc(a)
+			if a.exitFunc != nil {
+				a.ActorSystem().sysBus.Publish(ActorLifecycle, a.Name()+" exitFunc")
+				a.exitFunc(a)
+			}
 			a.as.unregister(a.name)
 			return
 		}
@@ -70,7 +73,9 @@ func protect(a *Actor, m ActorMsg, doFunc func(a *Actor, m ActorMsg)) {
 	defer func() {
 		// log.Debug("protect checking recover") // Println executes normally even if there is a panic
 		if x := recover(); x != nil {
-			log.Debugf("%v caught panic: %v", a.Name(), x)
+			// log.Debugf("%v caught panic: %v", a.Name(), x)
+			a.ActorSystem().sysBus.Publish(ActorLifecycle, fmt.Sprintf("%v caught panic: %v", a.Name(), x))
+
 			if a.Name() == "dlq" {
 				log.Fatalf("Urgh! DLQ loop - really dying")
 			}
@@ -93,6 +98,7 @@ func (a Actor) run(as *ActorSystem) (*ActorRef, error) {
 	}
 
 	if a.enterFunc != nil {
+		a.ActorSystem().sysBus.Publish(ActorLifecycle, a.Name()+" enterFunc")
 		// log.Debugf("Calling %v.enterFunc", a.name)
 		a.enterFunc(&a)
 	}
@@ -139,15 +145,22 @@ func (a *Actor) After(d time.Duration, data interface{}) {
 }
 
 // Send self a message every specified duration. This
-// fires repeatedly.
-func (a *Actor) Every(d time.Duration, data interface{}) {
+// fires repeatedly. It returns a channel - write anything
+// to this channel to stop the timer.
+func (a *Actor) Every(d time.Duration, data interface{}) chan interface{} {
+	ch := make(chan interface{}, 0)
 	go func() {
-		ticker := time.Tick(d)
+		ticker := time.NewTicker(d)
 		for {
-			<-ticker
-			a.mailbox <- NewActorMsg(data, nil)
+			select {
+			case <-ticker.C:
+				a.mailbox <- NewActorMsg(data, nil)
+			case <-ch:
+				ticker.Stop()
+			}
 		}
 	}()
+	return ch
 }
 
 // Get the ActorSystem in which the actor is running.
@@ -155,7 +168,7 @@ func (a *Actor) ActorSystem() *ActorSystem {
 	return a.as
 }
 
-// Get the UserData for the ActorSystem in which the actor is running.
-func (a *Actor) UserData() interface{} {
-	return a.as.UserData()
+// Get the SystemData for the ActorSystem in which the actor is running.
+func (a *Actor) SystemData() interface{} {
+	return a.as.SystemData()
 }

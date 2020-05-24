@@ -46,7 +46,9 @@ func BuildActorSystem() *ActorSystemBuilder {
 }
 
 // Assign user data to the actor system.
-func (sb *ActorSystemBuilder) WithUserData(userData interface{}) *ActorSystemBuilder {
+// Use with great care - this can subvert the isolation of actors imposed by
+// message passing. It is useful for holding global data such as coonection pools.
+func (sb *ActorSystemBuilder) WithSystemData(userData interface{}) *ActorSystemBuilder {
 	sb.as.userData = userData
 	return sb
 }

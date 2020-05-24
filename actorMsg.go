@@ -40,7 +40,8 @@ type ActorMsg interface {
 	// Returns the wrapped message - nil if no wrapped message.
 	Unwrap() ActorMsg
 
-	// Special message type used to kill the receiving actor.
+	// Special message type used to kill actors.
+	// This message type is never seen passed to the actor.
 	IsPoison() bool
 
 	// Special message type used to indicate a timeout.
@@ -107,7 +108,7 @@ func (msg actorMsg) Unwrap() ActorMsg {
 	return *w
 }
 
-// Check poison message.
+// Private method to check poison message.
 func (msg actorMsg) IsPoison() bool {
 	return msg.Type() == MsgTypePoison
 }

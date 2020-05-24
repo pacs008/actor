@@ -12,7 +12,7 @@ type mux2Builder struct {
 }
 
 // initFunc takes the outbound channel as an argument and returns the inbound
-func (as *ActorSystem) BuildMux(name string, initFunc func(chan<- []byte) chan []byte) *mux2Builder {
+func (as *ActorSystem) BuildMux(name string, initFunc func(<-chan []byte) chan []byte) *mux2Builder {
 	builder := &mux2Builder{
 		as,
 		&Mux{
@@ -33,8 +33,8 @@ func (as *ActorSystem) BuildMux(name string, initFunc func(chan<- []byte) chan [
 			func(_ interface{}) bool { return false }, // reqPassThru
 			func(_ interface{}) bool { return false }, // rspPassThru
 			ActorRef{},            // null passthruRspActor
-			make(chan []byte, 10), // reqChan
-			nil,                   // rspChan
+			nil,                   // toResChan
+			make(chan []byte, 10), // fromResChan
 			nil,                   // tick
 			5000,                  // timeout
 		},

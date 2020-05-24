@@ -9,6 +9,11 @@ type ActorRef struct {
 	name    string
 }
 
+// Name of the referenced actor
+func (ref *ActorRef) Name() string {
+	return ref.name
+}
+
 // send a message to an actor
 func (ref *ActorRef) SendMsg(msg ActorMsg) {
 	*ref.mailbox <- msg

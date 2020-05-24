@@ -1,17 +1,539 @@
-// actor_test
+// actor_examples_test
 package actor
 
 import (
-	"bytes"
 	"fmt"
-	"strconv"
-	"strings"
-	"testing"
 	"time"
+	/*
+		"bytes"
+		"fmt"
+		"strconv"
+		"strings"
+		"testing"
+		"time"
+	*/)
 
-	log "github.com/sirupsen/logrus"
-)
+func ExampleActorSystemBuilder() {
+	// create the actor system
+	actorSystem := BuildActorSystem(). // this returns ActorSystemBuilder
+						Run()
 
+	// create the actor
+	greeter, err := actorSystem.NewActor("greeter", func(actor *Actor, msg ActorMsg) {
+		fmt.Printf("Hello %v\n", msg.Data())
+	})
+
+	// check for error
+	if err != nil {
+		fmt.Printf("Failed to create actor: %v\n", err)
+	}
+
+	// send a message to the greeter actor
+	greeter.Send("Tom", nil)
+
+	// wait for result
+	time.Sleep(time.Duration(500 * time.Millisecond))
+
+	// Output:
+	// Hello Tom
+}
+
+func ExampleActorSystemBuilder_WithSystemData() {
+	// create the actor system with system data
+	actorSystem := BuildActorSystem().
+		WithSystemData("Hello").
+		Run()
+
+	// create the actor
+	greeter, err := actorSystem.NewActor("greeter", func(actor *Actor, msg ActorMsg) {
+		fmt.Printf("%v %v\n", actor.SystemData().(string), msg.Data())
+	})
+
+	// check for error
+	if err != nil {
+		fmt.Printf("Failed to create actor: %v\n", err)
+	}
+
+	// send a message to the greeter actor
+	greeter.Send("Tom", nil)
+
+	// wait for result
+	time.Sleep(time.Duration(500 * time.Millisecond))
+
+	// Output:
+	// Hello Tom
+}
+
+func ExampleActor() {
+	// create the actor system
+	actorSystem := NewActorSystem()
+
+	// create the actor
+	greeter, err := actorSystem.NewActor("greeter", func(actor *Actor, msg ActorMsg) {
+		fmt.Printf("Hello %v\n", msg.Data())
+	})
+
+	// check for error
+	if err != nil {
+		fmt.Printf("Failed to create actor: %v\n", err)
+	}
+
+	// send a message to the greeter actor
+	greeter.Send("Tom", nil)
+
+	// wait for result
+	time.Sleep(time.Duration(500 * time.Millisecond))
+
+	// Output:
+	// Hello Tom
+}
+
+func ExampleActorSystem_Lookup() {
+	// create the actor system
+	actorSystem := NewActorSystem()
+
+	// create the actor
+	_, err := actorSystem.NewActor("greeter", func(actor *Actor, msg ActorMsg) {
+		fmt.Printf("Hello %v\n", msg.Data())
+	})
+
+	// check for error
+	if err != nil {
+		fmt.Printf("Failed to create actor: %v\n", err)
+	}
+
+	// get the greeter reference from the directory
+	greeter, err := actorSystem.Lookup("greeter")
+
+	// check for error
+	if err != nil {
+		fmt.Printf("Failed to lookup greeter: %v\n", err)
+	}
+
+	// send a message to the greeter actor
+	greeter.Send("Dick", nil)
+
+	// look up non-existent actor
+	_, err = actorSystem.Lookup("meeter")
+
+	// check for error
+	if err != nil {
+		fmt.Printf("Failed to lookup meeter: %v\n", err)
+	}
+
+	// wait for result
+	time.Sleep(time.Duration(500 * time.Millisecond))
+
+	// Unordered output due to async processing
+
+	// Unordered output:
+	// Hello Dick
+	// Failed to lookup meeter: No actor named [meeter]
+
+}
+
+func ExampleActorSystem_ListActors() {
+	// create the actor system
+	actorSystem := NewActorSystem()
+
+	// create the actors
+	for _, name := range []string{"Larry", "Curly", "Moe"} {
+		_, err := actorSystem.NewActor(name, func(actor *Actor, msg ActorMsg) {
+			// do nothing
+		})
+		// check for error
+		if err != nil {
+			fmt.Printf("Failed to create actor: %v\n", err)
+		}
+	}
+
+	for _, name := range actorSystem.ListActors() {
+		fmt.Println(name)
+	}
+
+	// wait for result
+	time.Sleep(time.Duration(500 * time.Millisecond))
+
+	// Unordered output:
+	// Larry
+	// Curly
+	// Moe
+
+}
+
+func ExampleActor_closure() {
+	// create the actor system
+	actorSystem := NewActorSystem()
+
+	// actors should normally be stateless, but if you really
+	// need to maintain state you can close over state variables
+	f1, f2 := 0, 1
+	// create the actor
+	fibo, err := actorSystem.NewActor("fibo", func(actor *Actor, msg ActorMsg) {
+		f1, f2 = f2, f1+f2
+		fmt.Printf("%v\n", f2)
+	})
+
+	// check for error
+	if err != nil {
+		fmt.Printf("Failed to create actor: %v\n", err)
+	}
+
+	// generate 5 terms of Fibonacci series
+	for i := 0; i < 5; i++ {
+		fibo.Send("", nil)
+	}
+
+	// wait for result
+	time.Sleep(time.Duration(500 * time.Millisecond))
+
+	// Output:
+	// 1
+	// 2
+	// 3
+	// 5
+	// 8
+}
+
+func ExampleActorSystem_SystemBus() {
+	// create the actor system
+	actorSystem := NewActorSystem()
+
+	// create an actor to monitor the system bus
+	actorSystem.BuildActor("SysBusMon", func(ac *Actor, msg ActorMsg) {
+		switch msg.Type() {
+		case MsgTypeEvent:
+			fmt.Printf("%v\n", msg.Data())
+		default:
+			fmt.Printf("%v received unexpected type %T", ac.Name(), msg)
+		}
+	}).WithEnter(func(ac *Actor) {
+		ac.ActorSystem().SystemBus().Subscribe(ac.Ref(), ActorLifecycle, nil)
+	}).Run()
+
+	// create the actor
+	test, err := actorSystem.
+		BuildActor("test", func(actor *Actor, msg ActorMsg) {
+			fmt.Printf("Hello %v\n", msg.Data().(string))
+		}).
+		WithEnter(func(actor *Actor) {
+			// do nothing
+		}).
+		WithExit(func(actor *Actor) {
+			// do nothing
+		}).
+		Run()
+
+	// check for error
+	if err != nil {
+		fmt.Printf("Failed to create actor: %v\n", err)
+	}
+
+	// send an OK message
+	test.Send("Tom", nil)
+	// force a panic
+	test.Send(1, nil)
+	// send an nother OK message to prove it's still running
+	test.Send("Dick", nil)
+	// kill the actor
+	test.Kill()
+
+	// wait for result
+	time.Sleep(time.Duration(500 * time.Millisecond))
+
+	// Unordered output:
+	// SysBusMon running
+	// test registered
+	// test enterFunc
+	// test running
+	// Hello Tom
+	// test caught panic: interface conversion: interface {} is int, not string
+	// Hello Dick
+	// test exitFunc
+	// test unregistered
+
+}
+
+func ExampleActor_After() {
+	// create the actor system
+	actorSystem := NewActorSystem()
+
+	// create the actor
+	greeter, err := actorSystem.NewActor("greeter", func(actor *Actor, msg ActorMsg) {
+		if msg.Data().(string) == "Tom" {
+			actor.After(time.Duration(250*time.Millisecond), "myself")
+		}
+		fmt.Printf("Hello %v\n", msg.Data())
+	})
+
+	// check for error
+	if err != nil {
+		fmt.Printf("Failed to create actor: %v\n", err)
+	}
+
+	// send a message to the greeter actor
+	greeter.Send("Tom", nil)
+
+	// wait for result
+	time.Sleep(time.Duration(500 * time.Millisecond))
+
+	// Output:
+	// Hello Tom
+	// Hello myself
+}
+
+func ExampleActor_Every() {
+	// create the actor system
+	actorSystem := NewActorSystem()
+
+	// create the actor
+	var start time.Time     // time the actor started
+	var ch chan interface{} // channel to cancel timer
+	_, err := actorSystem.
+		BuildActor("timer", func(actor *Actor, msg ActorMsg) {
+			tenths := time.Since(start).Nanoseconds() / (1000 * 1000 * 100)
+			fmt.Printf("Elapsed %v/10 sec\n", tenths)
+			if tenths == 5 {
+				ch <- "stop"
+			}
+		}).
+		WithEnter(func(actor *Actor) {
+			// mark the start time and start the timer. Save the stop channel.
+			start = time.Now()
+			ch = actor.Every(time.Duration(100*time.Millisecond), "")
+		}).
+		Run()
+
+	// check for error
+	if err != nil {
+		fmt.Printf("Failed to create actor: %v\n", err)
+	}
+
+	// wait for result
+	time.Sleep(time.Duration(550 * time.Millisecond))
+
+	// Output:
+	// Elapsed 1/10 sec
+	// Elapsed 2/10 sec
+	// Elapsed 3/10 sec
+	// Elapsed 4/10 sec
+	// Elapsed 5/10 sec
+}
+
+func ExampleActorBuilder() {
+	// create the actor system
+	actorSystem := NewActorSystem()
+
+	// create the actor using builder - see WithEnter, WithExit etc.
+	// to see how the basic actor can be decorated
+	greeter, err := actorSystem.
+		BuildActor("greeter", func(actor *Actor, msg ActorMsg) {
+			fmt.Printf("Hello %v\n", msg.Data())
+		}).
+		Run() // run is needed to start the actor and return the ACtorRef
+
+	// check for error
+	if err != nil {
+		fmt.Printf("Failed to create actor: %v\n", err)
+	}
+
+	// send a message to the greeter actor
+	greeter.Send("Tom", nil)
+
+	// get the greeter reference from the directory
+	greeter1, err := actorSystem.Lookup("greeter")
+
+	// check for error
+	if err != nil {
+		fmt.Printf("Failed to lookup actor: %v\n", err)
+	}
+
+	// send a message to the greeter actor
+	greeter1.Send("Dick", nil)
+
+	// wait for result
+	time.Sleep(time.Duration(500 * time.Millisecond))
+
+	// Output:
+	// Hello Tom
+	// Hello Dick
+
+}
+
+func ExampleActorBuilder_WithEnter() {
+	// create the actor system
+	actorSystem := NewActorSystem()
+
+	// create the actor using builder
+	// add WithEnter to send a message to self after 250 ms
+	greeter, err := actorSystem.
+		BuildActor("greeter", func(actor *Actor, msg ActorMsg) {
+			fmt.Printf("Hello %v\n", msg.Data())
+		}).
+		WithEnter(func(actor *Actor) {
+			actor.After(time.Duration(250*time.Millisecond), "Dick")
+		}).
+		Run() // run is needed to start the actor and return the ACtorRef
+
+	// check for error
+	if err != nil {
+		fmt.Printf("Failed to create actor: %v\n", err)
+	}
+
+	// send a message to the greeter actor
+	greeter.Send("Tom", nil)
+
+	// wait for result
+	time.Sleep(time.Duration(500 * time.Millisecond))
+
+	// Output:
+	// Hello Tom
+	// Hello Dick
+
+}
+
+func ExampleActorBuilder_WithExit() {
+	// create the actor system
+	actorSystem := NewActorSystem()
+
+	// create the actor using builder
+	// add WithExit to say goodbye when killed
+	greeter, err := actorSystem.
+		BuildActor("greeter", func(actor *Actor, msg ActorMsg) {
+			fmt.Printf("Hello %v\n", msg.Data())
+		}).
+		WithExit(func(actor *Actor) {
+			fmt.Printf("Goodbye\n")
+		}).
+		Run() // run is needed to start the actor and return the ACtorRef
+
+	// check for error
+	if err != nil {
+		fmt.Printf("Failed to create actor: %v\n", err)
+	}
+
+	// send a message to the greeter actor
+	greeter.Send("Tom", nil)
+	// kill the actor
+	greeter.Kill()
+
+	// wait for result
+	time.Sleep(time.Duration(500 * time.Millisecond))
+
+	// Output:
+	// Hello Tom
+	// Goodbye
+
+}
+
+func ExampleActorBuilder_WithPool() {
+	// create the actor system
+	actorSystem := NewActorSystem()
+
+	// create the actor using builder
+	// add WithPool to create an actor pool
+	greeter, err := actorSystem.
+		BuildActor("greeter", func(actor *Actor, msg ActorMsg) {
+			// greet and say which pool instance is responding
+			fmt.Printf("Hello %v (%v)\n", msg.Data(), actor.Instance())
+		}).
+		WithPool(3).
+		Run() // run is needed to start the actor and return the ActorRef
+
+	// check for error
+	if err != nil {
+		fmt.Printf("Failed to create actor: %v\n", err)
+	}
+
+	// Send 6 messages; each pool member should receive 2
+	// but due to asyncronous execution, results may arrive
+	// out of order.
+	for i := 0; i < 6; i++ {
+		greeter.Send("Tom", nil)
+	}
+
+	// wait for result
+	time.Sleep(time.Duration(500 * time.Millisecond))
+
+	// Unordered output:
+	// Hello Tom (0)
+	// Hello Tom (1)
+	// Hello Tom (2)
+	// Hello Tom (0)
+	// Hello Tom (1)
+	// Hello Tom (2)
+
+}
+
+func ExampleActorRef_Call() {
+	// create the actor system
+	actorSystem := NewActorSystem()
+
+	type callType struct {
+		command string
+		data    interface{}
+	}
+	// create the called actor
+	called, err := actorSystem.NewActor("called", func(actor *Actor, msg ActorMsg) {
+		callRequest := msg.(CallRequest)
+		switch callRequest.Method() {
+		case "square":
+			num, ok := callRequest.Parameters().(int)
+			if ok {
+				callRequest.CallResponse(num*num, nil)
+			} else {
+				callRequest.CallResponse(nil, fmt.Errorf("I cannot square %T", callRequest.Parameters()))
+			}
+		case "cube":
+			// error checking omitted here
+			num := callRequest.Parameters().(int)
+			callRequest.CallResponse(num*num*num, nil)
+		case "timeout":
+			// do nothing, the caller will receive a timeout
+		default:
+			callRequest.CallResponse(nil, fmt.Errorf("Unknown command %v", callRequest.Method()))
+		}
+	})
+	// check for error
+	if err != nil {
+		fmt.Printf("Failed to create called actor: %v\n", err)
+	}
+
+	// create the caller actor
+	caller, err := actorSystem.NewActor("caller", func(actor *Actor, msg ActorMsg) {
+		call := msg.Data().(callType)
+		ret, err := called.Call(call.command, call.data, 100)
+		fmt.Printf("Call returned %v (err %v)\n", ret, err)
+	})
+	// check for error
+	if err != nil {
+		fmt.Printf("Failed to create caller actor: %v\n", err)
+	}
+
+	// square an integer to calling actor
+	caller.Send(callType{"square", 4}, nil)
+	// cube an integer to calling actor
+	caller.Send(callType{"cube", 5}, nil)
+	// send an unknown command
+	caller.Send(callType{"sqrt", 16}, nil)
+	// square a bad type
+	caller.Send(callType{"square", "7"}, nil)
+	// trigger a timeout
+	caller.Send(callType{"timeout", ""}, nil)
+
+	// wait for result
+	time.Sleep(time.Duration(500 * time.Millisecond))
+
+	// Output:
+	// Call returned 16 (err <nil>)
+	// Call returned 125 (err <nil>)
+	// Call returned <nil> (err Unknown command sqrt)
+	// Call returned <nil> (err I cannot square string)
+	// Call returned <nil> (err Timeout on call to called (100 ms))
+
+}
+
+/*
 // test message wrapping & unwrapping
 func TestMsg(t *testing.T) {
 	log.SetLevel(log.DebugLevel)
@@ -70,7 +592,7 @@ func TestActor(t *testing.T) {
 	busCh := make(chan string, 100)
 	dlq := make(chan ActorMsg, 0)
 	as := BuildActorSystem().
-		WithSystemData(&userType{"world"}).
+		WithUserData(&userType{"world"}).
 		WithDeadLetterQueue(func(_ *Actor, msg ActorMsg) {
 			dlq <- msg
 		}).
@@ -78,7 +600,7 @@ func TestActor(t *testing.T) {
 
 	fn := func(ac *Actor, msg ActorMsg) {
 		str := msg.Data().(string)
-		ch <- str + " " + ac.SystemData().(*userType).world
+		ch <- str + " " + ac.UserData().(*userType).world
 	}
 
 	monitorSysBus(as, busCh)
@@ -114,7 +636,6 @@ func TestActor(t *testing.T) {
 	if data != 999 {
 		t.Errorf("DLQ expected %v got %v", 999, data)
 	}
-	a1.Kill()
 	for _, s := range []string{
 		"SysBusMon running",
 		"test registered",
@@ -147,7 +668,7 @@ func TestCallError(t *testing.T) {
 				// don't reply
 			}
 		default:
-			log.Errorf("Expected CallRequest but got %v", msg.Type())
+			fmt.Printf("Expected CallRequest but got %v", msg.Type())
 		}
 	})
 
@@ -378,10 +899,8 @@ func ExampleEventBus() {
 	// Unordered output:
 	// SysBusMon running
 	// subscriber topic registered
-	// subscriber topic enterFunc
 	// subscriber topic running
 	// subscriber ^t.* registered
-	// subscriber ^t.* enterFunc
 	// subscriber ^t.* running
 	// subscriber ^t.* received message Hello
 	// subscriber ^t.* received pubSub topic/Some event
@@ -392,21 +911,16 @@ func ExampleEventBus() {
 	// subscriber0 received Event #0
 	// subscriber ^[r-u].* received pubSub topic/Some event
 	// subscriber ^[r-u].* registered
-	// subscriber ^[r-u].* enterFunc
 	// subscriber ^[r-u].* running
 	// subscriber ^[a-c].* received message Hello
 	// subscriber2 received Event #2
 	// subscriber ^[a-c].* registered
-	// subscriber ^[a-c].* enterFunc
 	// subscriber ^[a-c].* running
 	// subscriber0 registered
-	// subscriber0 enterFunc
 	// subscriber0 running
 	// subscriber1 registered
-	// subscriber1 enterFunc
 	// subscriber1 running
 	// subscriber2 registered
-	// subscriber2 enterFunc
 	// subscriber2 running
 	// subscriber2 unregistered
 	// subscriber1 unregistered
@@ -631,3 +1145,4 @@ func monitorSysBus(as *ActorSystem, ch chan string) {
 		ac.ActorSystem().SystemBus().Subscribe(ac.Ref(), ActorLifecycle, nil)
 	}).Run()
 }
+*/

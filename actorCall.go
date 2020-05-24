@@ -28,11 +28,16 @@ type callResponse struct {
 // Call makes a synchronous call to another actor by sending a
 // CallRequest message to to it. The receiving actor must reply
 // by calling the CallRequest.CallResponse method.
+// The caller specifies a method, it is up to the called actor
+// to interpret this.
+// The called actor can specify a timeout. If the called actor
+// does not reply within this time, the caller receives a timeout.
+// The called actor can return an error.
 func (ref *ActorRef) Call(method string,
-	req interface{},
+	parameters interface{},
 	timeoutMs int) (interface{}, error) {
 	reqMsg := CallRequest{
-		callRequest{newActorMsg(MsgTypeCall, req, nil),
+		callRequest{newActorMsg(MsgTypeCall, parameters, nil),
 			method,
 			make(chan interface{})}}
 	ref.SendMsg(reqMsg)
@@ -48,7 +53,7 @@ func (ref *ActorRef) Call(method string,
 		// OK it's some unstructured stuff
 		return rsp, nil
 	case <-timer.C:
-		return nil, fmt.Errorf("Call to %v timed out (%v ms)", ref.name, timeoutMs)
+		return nil, fmt.Errorf("Timeout on call to %v (%v ms)", ref.name, timeoutMs)
 	}
 }
 
