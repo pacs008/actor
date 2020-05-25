@@ -140,8 +140,11 @@ func (a *Actor) Instance() int {
 // Send self a message after the specified duration. This
 // fires one-off.  It returns a channel - write anything
 // to this channel to stop the timer.
+// Note: due to async processing, the timer may already have
+// fired when the stop channel is written. The channel has
+// buffer size one, so attempting to write twice will block.
 func (a *Actor) After(d time.Duration, data interface{}) chan interface{} {
-	ch := make(chan interface{}, 0)
+	ch := make(chan interface{}, 1)
 	go func() {
 		timer := time.NewTimer(d)
 		select {
@@ -157,8 +160,10 @@ func (a *Actor) After(d time.Duration, data interface{}) chan interface{} {
 // Send self a message every specified duration. This
 // fires repeatedly. It returns a channel - write anything
 // to this channel to stop the timer.
+// Note: The stop channel has buffer size one,
+// so attempting to write twice will block.
 func (a *Actor) Every(d time.Duration, data interface{}) chan interface{} {
-	ch := make(chan interface{}, 0)
+	ch := make(chan interface{}, 1)
 	go func() {
 		ticker := time.NewTicker(d)
 		for {
