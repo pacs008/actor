@@ -2,6 +2,7 @@ package actor
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -74,12 +75,13 @@ func protect(a *Actor, m ActorMsg, doFunc func(a *Actor, m ActorMsg)) {
 		// log.Debug("protect checking recover") // Println executes normally even if there is a panic
 		if x := recover(); x != nil {
 			// log.Debugf("%v caught panic: %v", a.Name(), x)
-			a.ActorSystem().sysBus.Publish(ActorLifecycle, fmt.Sprintf("%v caught panic: %v", a.Name(), x))
-
+			why := fmt.Sprintf("%v caught panic: %v", a.Name(), x)
+			a.ActorSystem().sysBus.Publish(ActorProblem, why)
+			// If the DLQ panics, we're out of business!
 			if a.Name() == "dlq" {
-				log.Fatalf("Urgh! DLQ loop - really dying")
+				log.Fatalf("DLQ panic: %v - no recovery - dying!", x)
 			}
-			a.ActorSystem().ToDeadLetter(m) // would be good to wrap this with a message
+			a.ActorSystem().ToDeadLetter(m.Wrap(why, nil)) // would be good to wrap this with a message
 		}
 	}()
 	// log.Debug("protect calling doFunc")
@@ -121,7 +123,7 @@ func (a Actor) validName() error {
 
 // Get the ActorRef for this actor - used to set Sender in messages.
 func (a *Actor) Ref() *ActorRef {
-	return &ActorRef{a.ActorSystem(), &a.mailbox, a.name}
+	return &ActorRef{a.ActorSystem(), &a.mailbox, a.name, false, *new(sync.Mutex)}
 }
 
 // Get the name for this actor.
@@ -136,12 +138,20 @@ func (a *Actor) Instance() int {
 }
 
 // Send self a message after the specified duration. This
-// fires one-off.
-func (a *Actor) After(d time.Duration, data interface{}) {
+// fires one-off.  It returns a channel - write anything
+// to this channel to stop the timer.
+func (a *Actor) After(d time.Duration, data interface{}) chan interface{} {
+	ch := make(chan interface{}, 0)
 	go func() {
-		<-time.After(d)
-		a.mailbox <- NewActorMsg(data, nil)
+		timer := time.NewTimer(d)
+		select {
+		case <-timer.C:
+			a.mailbox <- NewActorMsg(data, nil)
+		case <-ch:
+			timer.Stop()
+		}
 	}()
+	return ch
 }
 
 // Send self a message every specified duration. This

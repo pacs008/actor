@@ -4,32 +4,41 @@ package actor
 // 	"fmt"
 // )
 
-type routeFunc func(interface{}) *ActorRef
+// Choose a destination ActorRef based on
+// the message contents.
+type RouteFunc func(interface{}) *ActorRef
 
 type routeBuilder struct {
 	as     *ActorSystem
 	name   string
-	routes []routeFunc
+	routes []RouteFunc
 }
 
-// convenience method to quickly create a router without using builder
-func (as *ActorSystem) NewRouter(name string, fn routeFunc) (*ActorRef, error) {
+// Convenience method to quickly create a router without using builder.
+// A router is simply an actor that forwards a message to another actor
+// depending on the contents of the message.
+func (as *ActorSystem) NewRouter(name string, fn RouteFunc) (*ActorRef, error) {
 	return as.BuildRouter(name).AddRoute(fn).Run()
 }
 
+// Build a router.
+// A router is simply an actor that forwards a message to another actor
+// depending on the contents of the message.
 func (as *ActorSystem) BuildRouter(name string) *routeBuilder {
 	return &routeBuilder{
 		as,
 		name,
-		[]routeFunc{},
+		[]RouteFunc{},
 	}
 }
 
-func (rb *routeBuilder) AddRoute(fn routeFunc) *routeBuilder {
+// Add a route to the router.
+func (rb *routeBuilder) AddRoute(fn RouteFunc) *routeBuilder {
 	rb.routes = append(rb.routes, fn)
 	return rb
 }
 
+// Run the router.
 func (rb *routeBuilder) Run() (*ActorRef, error) {
 	a := Actor{
 		rb.as,

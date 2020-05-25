@@ -40,7 +40,10 @@ func (ref *ActorRef) Call(method string,
 		callRequest{newActorMsg(MsgTypeCall, parameters, nil),
 			method,
 			make(chan interface{})}}
-	ref.SendMsg(reqMsg)
+	err := ref.SendMsg(reqMsg)
+	if err != nil {
+		return nil, err
+	}
 	timer := time.NewTimer(time.Duration(timeoutMs) * time.Millisecond)
 	defer close(reqMsg.replyChan)
 	defer timer.Stop()

@@ -2,6 +2,8 @@
 package actor
 
 import (
+	"fmt"
+
 	log "github.com/sirupsen/logrus"
 )
 
@@ -16,22 +18,18 @@ func BuildActorSystem() *ActorSystemBuilder {
 	as := &ActorSystem{actors: make(map[string]*ActorRef)}
 	// create the dead letter queue
 	dlqBuilder := as.BuildActor("dlq", func(_ *Actor, msg ActorMsg) {
-		name := "<nil>"
-		if msg.Sender() != nil {
-			name = msg.Sender().name
-		}
-		log.WithFields(log.Fields{
-			"reason": "DLQ",
-			"source": name,
-		}).Error(msg.Data())
-		for true {
-			if msg = msg.Unwrap(); msg == nil {
-				break
+		wrapped := ""
+		for msg != nil {
+			name := "<nil>"
+			if msg.Sender() != nil {
+				name = msg.Sender().name
 			}
 			log.WithFields(log.Fields{
-				"reason": "DLQ (wrapped)",
-				"source": msg.Sender().name,
-			}).Error(msg.Data())
+				"reason": "DLQ",
+				"source": name,
+			}).Error(fmt.Sprintf("%v %v", wrapped, msg.Data()))
+			msg = msg.Unwrap()
+			wrapped = "(wrapped)"
 		}
 	}).
 		withHidden() // hide it

@@ -7,10 +7,11 @@ import (
 
 // Topics on the System Message Bus
 const (
-	ActorLifecycle = "actor_lifecycle"
+	ActorLifecycle = "actorLifecycle"
+	ActorProblem   = "actorProblem"
 )
 
-// the parent of all actors
+// The system that all actors operate in.
 type ActorSystem struct {
 	actors map[string]*ActorRef
 	sysBus EventBus
@@ -19,12 +20,12 @@ type ActorSystem struct {
 	userData interface{}
 }
 
-// create an actor system
+// Create an actor system.
 func NewActorSystem() *ActorSystem {
 	return BuildActorSystem().Run()
 }
 
-// register the actor
+// Register the actor.
 func (as *ActorSystem) register(ar *ActorRef) error {
 	as.Lock()
 	_, ok := as.actors[ar.name]
@@ -39,7 +40,7 @@ func (as *ActorSystem) register(ar *ActorRef) error {
 	return nil
 }
 
-// unregister the actor
+// Unregister the actor.
 func (as *ActorSystem) unregister(name string) {
 	as.Lock()
 	delete(as.actors, name)
@@ -48,7 +49,7 @@ func (as *ActorSystem) unregister(name string) {
 	as.sysBus.Publish(ActorLifecycle, name+" unregistered")
 }
 
-// get an actor ref by name
+// Get an ActorRef by the name of the actor.
 func (as *ActorSystem) Lookup(name string) (*ActorRef, error) {
 	ref, ok := as.actors[name]
 	if !ok {
@@ -58,7 +59,7 @@ func (as *ActorSystem) Lookup(name string) (*ActorRef, error) {
 	}
 }
 
-// return a list of all the actors in the system
+// Return a list of all the actors in the system.
 func (as *ActorSystem) ListActors() []string {
 	keys := make([]string, len(as.actors))
 
@@ -71,7 +72,7 @@ func (as *ActorSystem) ListActors() []string {
 	return keys
 }
 
-// send to DLQ
+// Send an ActorMsg to the DLQ.
 func (as *ActorSystem) ToDeadLetter(msg ActorMsg) {
 	as.dlq.Forward(msg)
 }
@@ -88,7 +89,7 @@ func (as *ActorSystem) SystemBus() *EventBus {
 	return &as.sysBus
 }
 
-// get the user data
+// Get the system data.
 func (as *ActorSystem) SystemData() interface{} {
 	return as.userData
 }

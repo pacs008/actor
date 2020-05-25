@@ -2,16 +2,11 @@
 package actor
 
 import (
+	"bytes"
 	"fmt"
+	"strings"
 	"time"
-	/*
-		"bytes"
-		"fmt"
-		"strconv"
-		"strings"
-		"testing"
-		"time"
-	*/)
+)
 
 func ExampleActorSystemBuilder() {
 	// create the actor system
@@ -64,6 +59,53 @@ func ExampleActorSystemBuilder_WithSystemData() {
 	// Hello Tom
 }
 
+func ExampleActorSystemBuilder_WithDeadLetterQueue() {
+	as := BuildActorSystem().WithDeadLetterQueue(func(_ *Actor, msg ActorMsg) {
+		fmt.Printf("DeadLetterQueue received %v", msg.Data())
+	}).
+		Run()
+
+	as.ToDeadLetter(NewActorMsg("Dead", nil))
+
+	// wait for result
+	time.Sleep(time.Duration(500 * time.Millisecond))
+
+	// Output:
+	// DeadLetterQueue received Dead
+}
+
+func ExampleActorSystemBuilder_WithDeadLetterQueue_panic() {
+	actorSystem := BuildActorSystem().WithDeadLetterQueue(func(_ *Actor, msg ActorMsg) {
+		fmt.Println(msg.Data())
+		msg = msg.Unwrap()
+		if msg != nil {
+			fmt.Printf("Message that caused panic: %v\n", msg.Data())
+		}
+	}).
+		Run()
+
+	// create the actor
+	nervous, err := actorSystem.NewActor("nervous", func(actor *Actor, msg ActorMsg) {
+		// force a panic; message will be written to DLQ
+		_ = msg.Data().(string)
+	})
+
+	// check for error
+	if err != nil {
+		fmt.Printf("Failed to create actor: %v\n", err)
+	}
+
+	// send a message to the nervous actor
+	nervous.Send(1, nil)
+
+	// wait for result
+	time.Sleep(time.Duration(500 * time.Millisecond))
+
+	// Output:
+	// nervous caught panic: interface conversion: interface {} is int, not string
+	// Message that caused panic: 1
+}
+
 func ExampleActor() {
 	// create the actor system
 	actorSystem := NewActorSystem()
@@ -86,6 +128,90 @@ func ExampleActor() {
 
 	// Output:
 	// Hello Tom
+}
+
+func ExampleActor_overload() {
+	// create the actor system
+	actorSystem := NewActorSystem()
+
+	// create the actor
+	slow, err := actorSystem.NewActor("slow", func(actor *Actor, msg ActorMsg) {
+		// deliberate delay in the actor
+		time.Sleep(time.Duration(20 * time.Millisecond))
+	})
+
+	// check for error
+	if err != nil {
+		fmt.Printf("Failed to create actor: %v\n", err)
+	}
+
+	// create an actor to monitor the system bus for problems
+	actorSystem.BuildActor("SysBusMon", func(ac *Actor, msg ActorMsg) {
+		switch msg.Type() {
+		case MsgTypeEvent:
+			fmt.Printf("SysBusMon: %v\n", msg.Data())
+		default:
+			fmt.Printf("%v received unexpected type %T\n", ac.Name(), msg)
+		}
+	}).WithEnter(func(ac *Actor) {
+		ac.ActorSystem().SystemBus().Subscribe(ac.Ref(), ActorProblem, nil)
+	}).Run()
+
+	// Hammer the actor with messages until it overloads
+	for {
+		err := slow.Send("", nil)
+		if err != nil {
+			fmt.Printf("Send failed: %v\n", err)
+			break
+		}
+	}
+
+	// wait for result
+	time.Sleep(time.Duration(500 * time.Millisecond))
+
+	// Unordered output:
+	// Send failed: Send to slow failed: queue full
+	// SysBusMon: slow overload
+}
+
+func ExampleActor_killed() {
+	// create the actor system
+	actorSystem := NewActorSystem()
+
+	// create the actor
+	victim, err := actorSystem.NewActor("victim", func(actor *Actor, msg ActorMsg) {
+		fmt.Printf("Hello %v\n", msg.Data())
+	})
+
+	// check for error
+	if err != nil {
+		fmt.Printf("Failed to create actor: %v\n", err)
+	}
+
+	// send a message to the victim actor
+	err = victim.Send("Tom", nil)
+	if err != nil {
+		fmt.Printf("Failed to send to actor: %v\n", err)
+	}
+
+	// kill the actor
+	victim.Kill()
+
+	// try sending to the killed actor
+	err = victim.Send("Dick", nil)
+	if err != nil {
+		fmt.Printf("Failed to send to actor: %v\n", err)
+	}
+
+	// Prove that a second Kill has no effect
+	victim.Kill()
+
+	// wait for result
+	time.Sleep(time.Duration(60 * time.Millisecond))
+
+	// Unordered output:
+	// Hello Tom
+	// Failed to send to actor: Send to victim failed: closed
 }
 
 func ExampleActorSystem_Lookup() {
@@ -132,6 +258,57 @@ func ExampleActorSystem_Lookup() {
 
 }
 
+func ExampleActorSystem_BuildRouter() {
+	// create the actor system
+	actorSystem := NewActorSystem()
+
+	// create the actors
+	vowel, err := actorSystem.NewActor("vowel", func(actor *Actor, msg ActorMsg) {
+		fmt.Printf("%v received %v\n", actor.Name(), msg.Data())
+	})
+	consonant, err := actorSystem.NewActor("consonant", func(actor *Actor, msg ActorMsg) {
+		fmt.Printf("%v received %v\n", actor.Name(), msg.Data())
+	})
+
+	// Build the router
+	router, err := actorSystem.BuildRouter("router").AddRoute(func(data interface{}) *ActorRef {
+		str := data.(string)
+		if strings.ContainsAny(str[0:1], "aeiou") {
+			return vowel
+		}
+		return consonant
+	}).
+		Run()
+
+	// check for error
+	if err != nil {
+		fmt.Printf("Failed to create router: %v\n", err)
+	}
+
+	// send messages to the router
+	for _, country := range []string{
+		"algeria",
+		"bulgaria",
+		"eritrea",
+		"greece",
+		"india",
+		"latvia",
+	} {
+		router.Send(country, nil)
+	}
+
+	// wait for result
+	time.Sleep(time.Duration(500 * time.Millisecond))
+
+	// Unordered output:
+	// vowel received algeria
+	// consonant received bulgaria
+	// vowel received eritrea
+	// consonant received greece
+	// vowel received india
+	// consonant received latvia
+}
+
 func ExampleActorSystem_ListActors() {
 	// create the actor system
 	actorSystem := NewActorSystem()
@@ -158,7 +335,6 @@ func ExampleActorSystem_ListActors() {
 	// Larry
 	// Curly
 	// Moe
-
 }
 
 func ExampleActor_closure() {
@@ -200,6 +376,7 @@ func ExampleActorSystem_SystemBus() {
 	actorSystem := NewActorSystem()
 
 	// create an actor to monitor the system bus
+	// Note: regex to monitor actor lifecycle evens and problems
 	actorSystem.BuildActor("SysBusMon", func(ac *Actor, msg ActorMsg) {
 		switch msg.Type() {
 		case MsgTypeEvent:
@@ -208,7 +385,9 @@ func ExampleActorSystem_SystemBus() {
 			fmt.Printf("%v received unexpected type %T", ac.Name(), msg)
 		}
 	}).WithEnter(func(ac *Actor) {
-		ac.ActorSystem().SystemBus().Subscribe(ac.Ref(), ActorLifecycle, nil)
+		ac.ActorSystem().SystemBus().Subscribe(ac.Ref(),
+			ActorProblem+"|"+ActorLifecycle,
+			nil)
 	}).Run()
 
 	// create the actor
@@ -318,6 +497,35 @@ func ExampleActor_Every() {
 	// Elapsed 3/10 sec
 	// Elapsed 4/10 sec
 	// Elapsed 5/10 sec
+}
+
+func ExampleActor_SystemData() {
+	type mySystemData struct {
+		myString string
+		myInt    int
+	}
+	// create the actor system
+	actorSystem := BuildActorSystem().WithSystemData(mySystemData{"Answer", 42}).Run()
+
+	// create the actor
+	actor, err := actorSystem.NewActor("actor", func(actor *Actor, msg ActorMsg) {
+		msd := actor.SystemData().(mySystemData)
+		fmt.Printf("SystemData %v %v\n", msd.myString, msd.myInt)
+	})
+
+	// check for error
+	if err != nil {
+		fmt.Printf("Failed to create actor: %v\n", err)
+	}
+
+	// Send message to actor
+	actor.Send("", nil)
+
+	// wait for result
+	time.Sleep(time.Duration(500 * time.Millisecond))
+
+	// Output:
+	// SystemData Answer 42
 }
 
 func ExampleActorBuilder() {
@@ -533,188 +741,181 @@ func ExampleActorRef_Call() {
 
 }
 
-/*
-// test message wrapping & unwrapping
-func TestMsg(t *testing.T) {
-	log.SetLevel(log.DebugLevel)
+func ExampleEventBus() {
+	as := NewActorSystem()
 
+	// Create event bus, filter to ensure only strings get published
+	eb := NewEventBus(func(data interface{}) bool {
+		_, ok := data.(string)
+		return ok
+	})
+
+	// this will throw an error
+	err := eb.Publish("bad", 123)
+	fmt.Println(err.Error())
+
+	// Demonstrate pattern matching
+	for i, pattern := range []string{"africa", "a.*c.*a", "a.*a"} {
+		pat := pattern // local copy for this actor
+		a, err := as.BuildActor(fmt.Sprintf("Subs %v", i), func(ac *Actor, msg ActorMsg) {
+			switch msg.Type() {
+			case MsgTypeEvent:
+				event := msg.(BusEvent)
+				fmt.Printf("%v (%v) received pubSub %v/%v\n", ac.Name(), pat, event.Topic(), event.Data())
+			default:
+				fmt.Printf("%v (%v) received message %v\n", ac.Name(), pat, msg.Data())
+			}
+		}).
+			WithEnter(func(ac *Actor) {
+				err := eb.Subscribe(ac.Ref(), pattern, func(data interface{}) bool {
+					food, ok := data.(string)
+					return ok && food != "broccoli" // nobody like broccoli
+				})
+				if err != nil {
+					fmt.Printf("%v: Subscribe failed %v\n", ac.Name(), err)
+				}
+			}).
+			Run()
+		if err != nil {
+			fmt.Println(err.Error())
+		}
+		// actors can handle normal messages as well as pub/sub
+		a.Send("Hello", nil) // just to prove
+	}
+
+	for _, data := range []struct {
+		country string
+		food    string
+	}{{"america", "hamburger"},
+		{"africa", "ackee"},
+		{"asia", "noodles"},
+		{"albania", "broccoli"}} {
+		fmt.Printf("Publish %v/%v\n", data.country, data.food)
+		eb.Publish(data.country, data.food)
+
+	}
+
+	// wait for result
+	time.Sleep(time.Duration(500 * time.Millisecond))
+
+	// Unordered output:
+	// Wrong message type for bus
+	// Subs 0 (africa) received message Hello
+	// Subs 1 (a.*c.*a) received message Hello
+	// Subs 2 (a.*a) received message Hello
+	// Publish america/hamburger
+	// Subs 1 (a.*c.*a) received pubSub america/hamburger
+	// Subs 2 (a.*a) received pubSub america/hamburger
+	// Publish africa/ackee
+	// Subs 0 (africa) received pubSub africa/ackee
+	// Subs 2 (a.*a) received pubSub africa/ackee
+	// Subs 1 (a.*c.*a) received pubSub africa/ackee
+	// Publish asia/noodles
+	// Subs 2 (a.*a) received pubSub asia/noodles
+	// Publish albania/broccoli
+}
+
+// ActorMsg is an interface so this example does
+// not appear in the godoc documentation :(
+func ExampleActorMsg_Wrap() {
 	wrapped := "wrapped"
 	m := NewActorMsg(wrapped, nil)
 
 	wrapper := "wrapper"
 	m = m.Wrap(wrapper, nil)
 
-	if m.Data() != wrapper {
-		t.Errorf("expected %v, got %v", wrapper, m.Data())
-	}
+	fmt.Printf("Wrapper: %v\n", m.Data())
 	m = m.Unwrap()
-	if m == nil {
-		t.Errorf("expected %v, got %v", wrapped, m)
-	} else if m.Data() != wrapped {
-		t.Errorf("expected %v, got %v", wrapped, m.Data())
-	}
+	fmt.Printf("Wrapped: %v\n", m.Data())
 	m = m.Unwrap()
-	if m != nil {
-		t.Errorf("expected nil, got %v", m)
-	}
+	fmt.Printf("Nil: %v\n", m)
+
+	// Output:
+	// Wrapper: wrapper
+	// Wrapped: wrapped
+	// Nil: <nil>
 }
 
-// test the dead letter queue
-func TestDLQ(t *testing.T) {
-	log.SetLevel(log.DebugLevel)
-	ch := make(chan ActorMsg, 0)
-
-	as := BuildActorSystem().WithDeadLetterQueue(func(_ *Actor, m ActorMsg) {
-		ch <- m
-	}).
-		Run()
-
-	deadMsg := "Dead"
-	as.ToDeadLetter(NewActorMsg(deadMsg, nil))
-
-	msg := <-ch
-
-	data := msg.(ActorMsg).Data()
-
-	if data != deadMsg {
-		t.Errorf("DLQ expected %v got %v", deadMsg, data)
-	}
-}
-
-// test a single actor - get reference by
-// creation and by lookup
-func TestActor(t *testing.T) {
-	type userType struct {
-		world string
-	}
-	log.SetLevel(log.DebugLevel)
-	ch := make(chan string, 100)
-	busCh := make(chan string, 100)
-	dlq := make(chan ActorMsg, 0)
-	as := BuildActorSystem().
-		WithUserData(&userType{"world"}).
-		WithDeadLetterQueue(func(_ *Actor, msg ActorMsg) {
-			dlq <- msg
-		}).
-		Run()
-
-	fn := func(ac *Actor, msg ActorMsg) {
-		str := msg.Data().(string)
-		ch <- str + " " + ac.UserData().(*userType).world
-	}
-
-	monitorSysBus(as, busCh)
-
-	// check we can create actor
-	a, err := as.NewActor("test", fn)
-	if err != nil {
-		t.Error("Create actor failed")
-	}
-
-	// send to actor ref
-	a.Send("Hello", nil)
-	rsp := <-ch
-	if rsp != "Hello world" {
-		t.Errorf("Expected %v got %v", "Hello world", rsp)
-	}
-
-	// lookup and send to it
-	a1, err := as.Lookup("test")
-	if err != nil {
-		t.Error("Lookup actor failed")
-	}
-	a1.Send("Goodbye cruel", nil)
-	rsp = <-ch
-	if rsp != "Goodbye cruel world" {
-		t.Errorf("Expected %v got %v", "Goodbye cruel world", rsp)
-	}
-
-	// send a non-string to check panic handling
-	a1.Send(999, nil)
-	msg := <-dlq
-	data := msg.(ActorMsg).Data()
-	if data != 999 {
-		t.Errorf("DLQ expected %v got %v", 999, data)
-	}
-	for _, s := range []string{
-		"SysBusMon running",
-		"test registered",
-		"test running",
-		"test caught panic: interface conversion: interface {} is int, not string",
-	} {
-		msg := <-busCh
-		if msg != s {
-			t.Errorf("Expected %v, got %v", s, msg)
-		}
-	}
-}
-
-// TestCallError
-func TestCallError(t *testing.T) {
-	log.SetLevel(log.DebugLevel)
+func ExampleMux() {
 	as := NewActorSystem()
-	ch := make(chan string, 0)
 
-	aRsp, err := as.NewActor("aRsp", func(ac *Actor, msg ActorMsg) {
-		switch msg.(type) {
-		case CallRequest:
-			callRequest := msg.(CallRequest)
-			switch callRequest.Parameters().(string) {
-			case "ok":
-				callRequest.CallResponse("success", nil)
-			case "nok":
-				callRequest.CallResponse("fail", fmt.Errorf("Error message"))
-			case "timeout":
-				// don't reply
+	// Init function acts like a mock
+	// Copy request channel to response, appending
+	// "Rsp" to the message. If the message is "ccc
+	// then delay for 2 seconds before replying
+	muxInitFn := func(toResChan <-chan []byte) chan []byte {
+		fromResChan := make(chan []byte, 0) // Mux reads this channel
+		go func() {
+			// log.Debug("muxFn starting")
+			for msg := range toResChan {
+				if 0 == bytes.Compare(msg, []byte("ccc")) {
+					go func() {
+						<-time.After(time.Duration(1000 * time.Millisecond))
+						fromResChan <- append(msg, []byte("Rsp")...)
+					}()
+					continue
+				}
+				//log.Debug("muxFn relaying " + string(msg))
+				fromResChan <- append(msg, []byte("Rsp")...)
 			}
-		default:
-			fmt.Printf("Expected CallRequest but got %v", msg.Type())
-		}
-	})
+		}()
+		return fromResChan
+	}
 
+	// create a multiplexer that sends to chan
+	mux, err := as.BuildMux("aMux", muxInitFn).
+		WithKeyBuilder(func(s interface{}) string { return string(s.([]byte))[0:3] }).
+		WithTimeout(500).
+		Run()
+
+	// Simple function for test actors
+	fn := func(ac *Actor, msg ActorMsg) {
+		str := string(msg.Data().([]byte))
+		if len(str) == 3 {
+			if msg.IsTimeout() {
+				fmt.Printf(ac.Name()+" Timeout '%v'\n", str)
+			} else {
+				fmt.Printf(ac.Name()+" Sending '%v'\n", str)
+				mux.Send(msg.Data(), ac.Ref())
+			}
+		} else {
+			fmt.Printf(ac.Name()+" Received '%v'\n", str)
+		}
+	}
+
+	aRef, err := as.BuildActor("ActorA", fn).Run()
 	if err != nil {
-		t.Error("Create actor aRsp failed")
+		fmt.Println("Create ActorA failed")
 	}
-	aReq, err := as.NewActor("aReq", func(ac *Actor, msg ActorMsg) {
-		rsp, err := aRsp.Call("myMethod", msg.Data(), 1000)
-		// log.Infof("TestCallError %v", err)
-		if err != nil {
-			ch <- "Error: " + err.Error()
-			return
-		}
-		switch rsp.(type) {
-		case string:
-			ch <- rsp.(string)
-		default:
-			ch <- fmt.Sprintf("Unexpected type: %T", rsp)
-		}
-	})
+
+	bRef, err := as.BuildActor("ActorB", fn).Run()
 	if err != nil {
-		t.Error("Create actor aReq failed")
+		fmt.Println("Create ActorB failed")
 	}
 
-	// Send a normal message
-	aReq.Send("ok", nil)
-	rsp := <-ch
-	if rsp != "success" {
-		t.Errorf("Expected 'success' got '%v'", rsp)
-	}
+	// normal mux messages
+	aMsg := []byte("aaa")
+	aRef.Send(aMsg, nil)
 
-	// Trigger an error
-	aReq.Send("nok", nil)
-	rsp = <-ch
-	if rsp != "Error: Error message" {
-		t.Errorf("Expected 'Error: Error message' got '%v'", rsp)
-	}
+	aMsg = []byte("bbb")
+	bRef.Send(aMsg, nil)
 
-	// Trigger a timeout
-	aReq.Send("timeout", nil)
-	rsp = <-ch
-	if !strings.HasPrefix(rsp, "Error: Timeout") {
-		t.Errorf("Expected 'Error: Timeout*' got '%v'", rsp)
-	}
+	// test mux timeout
+	aMsg = []byte("ccc")
+	bRef.Send(aMsg, nil)
+
+	time.Sleep(time.Duration(1200 * time.Millisecond))
+
+	// Unordered output:
+	// ActorA Sending 'aaa'
+	// ActorA Received 'aaaRsp'
+	// ActorB Sending 'bbb'
+	// ActorB Sending 'ccc'
+	// ActorB Received 'bbbRsp'
+	// ActorB Timeout 'ccc'
 }
 
+/*
 // test a pair of actors, one forwards to the
 // other, which replies to the first
 func TestReqRsp(t *testing.T) {
@@ -754,261 +955,6 @@ func TestReqRsp(t *testing.T) {
 	}
 	// log.Infof("Received '%v'", rsp)
 
-}
-
-// test an actor with After
-func TestAfter(t *testing.T) {
-	log.SetLevel(log.DebugLevel)
-	as := NewActorSystem()
-	ch := make(chan string, 0)
-
-	// create an actor with after
-	doFunc := makeChanWriterFn(ch)
-	enterFunc := func(ac *Actor) {
-		go func() {
-			<-time.After(time.Duration(500 * time.Millisecond))
-			ch <- "after"
-		}()
-		ac.After(time.Duration(1*time.Second), "sendMeAfter")
-	}
-	as.BuildActor("aAfter", doFunc).WithEnter(enterFunc).Run()
-	// _, err := as.NewActor("aAfter", doFunc, enterFunc)
-	// if err != nil {
-	// 	t.Error("Create actor aAfter failed")
-	// }
-
-	rsp := <-ch
-	if rsp != "after" {
-		t.Errorf("Expected 'after' got '%v'", rsp)
-	}
-	rsp = <-ch
-	if rsp != "sendMeAfter" {
-		t.Errorf("Expected 'sendMeAfter' got '%v'", rsp)
-	}
-	// log.Infof("Received '%v'", rsp)
-
-}
-
-// test an actor with Every
-func TestEvery(t *testing.T) {
-	log.SetLevel(log.DebugLevel)
-	as := NewActorSystem()
-	ch := make(chan string, 0)
-
-	// create an actor with every
-	doFunc := makeChanWriterFn(ch)
-	enterFunc := func(ac *Actor) {
-		ac.Every(time.Second, "every")
-	}
-	_, err := as.BuildActor("aEvery", doFunc).WithEnter(enterFunc).Run()
-	if err != nil {
-		t.Error("Create actor aEvery failed")
-	}
-
-	for i := 0; i < 2; i++ {
-		rsp := <-ch
-		if rsp != "every" {
-			t.Errorf("Expected 'every' got '%v'", rsp)
-		}
-	}
-}
-
-// example event bus
-func ExampleEventBus() {
-	log.SetLevel(log.DebugLevel)
-	ch := make(chan string, 100)
-	as := NewActorSystem()
-
-	eb := NewEventBus(func(data interface{}) bool {
-		_, ok := data.(string)
-		return ok
-	})
-
-	// check that system bus works
-	monitorSysBus(as, ch)
-
-	// check that topic matching works
-	for _, pattern := range []string{"topic", "^t.*", "^[r-u].*", "^[a-c].*"} {
-		a, err := as.BuildActor(fmt.Sprintf("subscriber %v", pattern), func(ac *Actor, msg ActorMsg) {
-			switch msg.Type() {
-			case MsgTypeEvent:
-				event := msg.(BusEvent)
-				ch <- fmt.Sprintf("%v received pubSub %v/%v", ac.Name(), event.Topic(), event.Data())
-			default:
-				ch <- fmt.Sprintf("%v received message %v", ac.Name(), msg.Data())
-			}
-		}).
-			WithEnter(func(ac *Actor) {
-				err := eb.Subscribe(ac.Ref(), pattern, nil)
-				if err != nil {
-					ch <- fmt.Sprintf("%v: Subscribe failed %v", ac.Name(), err)
-				}
-			}).Run()
-		if err != nil {
-			ch <- err.Error()
-		}
-		a.Send("Hello", nil)
-	}
-	eb.Publish("topic", fmt.Sprintf("Some event"))
-
-	// create three actors, each subscribing with a particular filter
-	subscribers := make([]*ActorRef, 0)
-	for i := 0; i < 3; i++ {
-		myStr := strconv.Itoa(i)
-		a, err := as.BuildActor(fmt.Sprintf("subscriber%v", i), func(ac *Actor, msg ActorMsg) {
-			switch msg.Type() {
-			case MsgTypeEvent:
-				event := msg.(BusEvent)
-				ch <- fmt.Sprintf("%v received %v", ac.Name(), event.Data())
-			}
-		}).
-			WithEnter(func(ac *Actor) {
-				eb.Subscribe(ac.Ref(), "", func(data interface{}) bool {
-					if s, ok := data.(string); ok && strings.Index(s, myStr) > -1 {
-						return true
-					}
-					return false
-				})
-			}).Run()
-		if err != nil {
-			ch <- err.Error()
-		}
-		subscribers = append(subscribers, a)
-	}
-
-	for i := 0; i < 3; i++ {
-		eb.Publish("myTopic", fmt.Sprintf("Event #%v", i))
-	}
-
-	// kill them to check lifecycle
-	for _, subscriber := range subscribers {
-		subscriber.Kill()
-	}
-
-	timer := time.NewTimer(time.Duration(500) * time.Millisecond)
-
-	for done := false; !done; {
-		select {
-		case msg := <-ch:
-			fmt.Println(msg)
-		case <-timer.C:
-			done = true
-		}
-	}
-
-	// Unordered output:
-	// SysBusMon running
-	// subscriber topic registered
-	// subscriber topic running
-	// subscriber ^t.* registered
-	// subscriber ^t.* running
-	// subscriber ^t.* received message Hello
-	// subscriber ^t.* received pubSub topic/Some event
-	// subscriber1 received Event #1
-	// subscriber topic received message Hello
-	// subscriber topic received pubSub topic/Some event
-	// subscriber ^[r-u].* received message Hello
-	// subscriber0 received Event #0
-	// subscriber ^[r-u].* received pubSub topic/Some event
-	// subscriber ^[r-u].* registered
-	// subscriber ^[r-u].* running
-	// subscriber ^[a-c].* received message Hello
-	// subscriber2 received Event #2
-	// subscriber ^[a-c].* registered
-	// subscriber ^[a-c].* running
-	// subscriber0 registered
-	// subscriber0 running
-	// subscriber1 registered
-	// subscriber1 running
-	// subscriber2 registered
-	// subscriber2 running
-	// subscriber2 unregistered
-	// subscriber1 unregistered
-	// subscriber0 unregistered
-}
-
-// test round robin pool
-func TestRobin(t *testing.T) {
-	log.SetLevel(log.DebugLevel)
-	as := NewActorSystem()
-	ch := make(chan string, 0)
-
-	// create an actor with every
-	doFunc := func(ac *Actor, msg ActorMsg) {
-		str := msg.Data().(string)
-		ch <- str + fmt.Sprintf("%v", ac.Instance())
-	}
-
-	aRobin, err := as.BuildActor("aRobin", doFunc).WithPool(10).Run()
-	if err != nil {
-		t.Error("Create actor aRobin failed")
-	}
-
-	for i := 0; i < 20; i++ {
-		aRobin.Send("Hello ", nil)
-		// rsp := <-ch
-		// log.Infof("Received '%v'", rsp)
-	}
-
-	// add the instance numbers 0..9 * 2 = 90
-	sum := 0
-	n := 0
-	for i := 0; i < 20; i++ {
-		rsp := <-ch
-		fmt.Sscanf(rsp, "Hello %d", &n)
-		sum += n
-		// log.Infof("Received '%v'", rsp)
-	}
-	if sum != 90 {
-		t.Errorf("Expected 90 got %v", sum)
-	}
-	aRobin.Kill()
-	// time.Sleep(time.Second)
-}
-
-// test router
-// use example rather than test just for a change!
-func ExampleRouter() {
-	log.SetLevel(log.DebugLevel)
-	as := NewActorSystem()
-	ch := make(chan string, 0)
-	// check that we can make an actor loop function
-	// by closing over local variables
-	makeWriter := func(ch chan string, rsp string) func(*Actor, ActorMsg) {
-		return func(_ *Actor, msg ActorMsg) {
-			ch <- rsp
-		}
-	}
-
-	a1, err := as.NewActor("a1", makeWriter(ch, "a1"))
-	if err != nil {
-		log.Error("Create actor a1 failed")
-	}
-	a2, err := as.NewActor("a2", makeWriter(ch, "a2"))
-	if err != nil {
-		log.Error("Create actor a2 failed")
-	}
-	ar, err := as.NewRouter("r1", func(d interface{}) *ActorRef {
-		switch {
-		case strings.Contains(d.(string), "a1"):
-			return a1
-		case strings.Contains(d.(string), "a2"):
-			return a2
-		}
-		return nil
-	})
-	if err != nil {
-		log.Error("Create router failed")
-	}
-
-	ar.Send("This is a1", nil)
-	fmt.Printf(<-ch + "\n")
-	ar.Send("This is a2", nil)
-	fmt.Printf(<-ch + "\n")
-
-	// Output:
-	// a1
-	// a2
 }
 
 // test mux
@@ -1106,43 +1052,5 @@ func ExampleMux() {
 	// ActorB Sending 'ccc'
 	// ActorB Received 'bbbRsp'
 	// ActorB Timeout 'ccc'
-}
-
-// check that we can make an actor loop function
-// by closing over local variables
-func makeChanWriterFn(ch chan string) func(*Actor, ActorMsg) {
-	return func(_ *Actor, msg ActorMsg) {
-		str := msg.Data().(string)
-		ch <- str
-	}
-}
-
-func makeActorSenderFn(ref *ActorRef) func(*Actor, ActorMsg) {
-	return func(ac *Actor, msg ActorMsg) {
-		str := msg.Data().(string)
-		if len(str) == 3 {
-			if msg.IsTimeout() {
-				log.Infof(ac.Name()+" Timeout '%v'", str)
-			} else {
-				log.Infof(ac.Name()+" Sending '%v'", str)
-				ref.Send(str, ac.Ref())
-			}
-		} else {
-			log.Infof(ac.Name()+" Received '%v'", str)
-		}
-	}
-}
-
-func monitorSysBus(as *ActorSystem, ch chan string) {
-	as.BuildActor("SysBusMon", func(ac *Actor, msg ActorMsg) {
-		switch msg.Type() {
-		case MsgTypeEvent:
-			ch <- msg.Data().(string)
-		default:
-			ch <- fmt.Sprintf("%v received unexpected type %T", ac.Name(), msg)
-		}
-	}).WithEnter(func(ac *Actor) {
-		ac.ActorSystem().SystemBus().Subscribe(ac.Ref(), ActorLifecycle, nil)
-	}).Run()
 }
 */
