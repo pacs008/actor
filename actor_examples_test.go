@@ -673,6 +673,54 @@ func ExampleActorBuilder_WithPool() {
 
 }
 
+func ExampleActorBuilder_WithBuffer() {
+	// create the actor system
+	actorSystem := NewActorSystem()
+
+	// create two actors using builder
+	// one has default buffer size of 10
+	// other WithBuffer to set buffer size 50
+	a10, err := actorSystem.
+		BuildActor("warthog", func(actor *Actor, msg ActorMsg) {
+			time.Sleep(time.Duration(5 * time.Millisecond))
+		}).
+		Run() // run is needed to start the actor and return the ActorRef
+	// check for error
+	if err != nil {
+		fmt.Printf("Failed to create actor: %v\n", err)
+	}
+
+	b52, err := actorSystem.
+		BuildActor("buff", func(actor *Actor, msg ActorMsg) {
+			time.Sleep(time.Duration(5 * time.Millisecond))
+		}).
+		WithBuffer(52).
+		Run() // run is needed to start the actor and return the ActorRef
+
+	// check for error
+	if err != nil {
+		fmt.Printf("Failed to create actor: %v\n", err)
+	}
+
+	// send 25 messages to each
+	// a10 warthog should overload, b52 buff should not
+	for _, aRef := range []*ActorRef{a10, b52} {
+		for i := 0; i < 25; i++ {
+			err := aRef.Send("", nil)
+			if err != nil {
+				fmt.Println(err)
+				break
+			}
+		}
+	}
+
+	// wait for result
+	time.Sleep(time.Duration(500 * time.Millisecond))
+
+	// Output:
+	// Send to warthog failed: queue full
+}
+
 func ExampleActorRef_Call() {
 	// create the actor system
 	actorSystem := NewActorSystem()

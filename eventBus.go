@@ -26,7 +26,9 @@ type subscriber struct {
 	filter   func(interface{}) bool
 }
 
-// Event bus is a pub-sub mechanism
+// EventBus is a pub-sub mechanism. Actors can subscribe
+// to topics on the bus. Actors receive events like standard
+// ActorMsg, with Type() of MsgTypeEvent.
 type EventBus struct {
 	eventBus
 }
@@ -38,6 +40,7 @@ type eventBus struct {
 	subscribers []subscriber
 }
 
+// NewBusEvent creates a new BusEvent.
 func NewBusEvent(topic string, msg interface{}, caller *ActorRef) BusEvent {
 	return busEvent{
 		newActorMsg(MsgTypeEvent, msg, caller),
@@ -46,11 +49,17 @@ func NewBusEvent(topic string, msg interface{}, caller *ActorRef) BusEvent {
 	}
 }
 
+// NewEventBus creates a new EventBus. If specified, the filter
+// function is applied to data of events sent on the bus. If the
+// filter returns false, the send fails.
 func NewEventBus(filter func(interface{}) bool) EventBus {
 	return EventBus{eventBus{filter: filter, subscribers: make([]subscriber, 0)}}
 }
 
-// subscribe an actor to the event bus
+// Subscribe allows an actor to subscribe to events on the event bus.
+// The pattern is a regex - the actor will only receive events on topics
+// that match the regex. In addition, the optional filter is applied
+// to event data. If the filter returns false, the actor does not receive it.
 func (bus *EventBus) Subscribe(ar *ActorRef, pattern string, filter func(interface{}) bool) error {
 	bus.Lock()
 	defer bus.Unlock()
@@ -75,7 +84,7 @@ func (bus *EventBus) Subscribe(ar *ActorRef, pattern string, filter func(interfa
 	return nil
 }
 
-// unsubscribe the actor from the event bus
+// Unsubscribe the actor from the event bus.
 func (bus *EventBus) Unsubscribe(ar *ActorRef) {
 	bus.Lock()
 	defer bus.Unlock()
@@ -93,7 +102,7 @@ func (bus *EventBus) Unsubscribe(ar *ActorRef) {
 	}
 }
 
-// publish to all subscribers
+// Publish an event to all subscribers.
 func (bus *EventBus) Publish(topic string, msg interface{}) error {
 	be := NewBusEvent(topic, msg, nil)
 	if bus.filter != nil && !bus.filter(msg) {
@@ -108,10 +117,12 @@ func (bus *EventBus) Publish(topic string, msg interface{}) error {
 	return nil
 }
 
+// Timestamp returns the time at which the event was created.
 func (be busEvent) Timestamp() time.Time {
 	return be.timestamp
 }
 
+// Topic returns the topic of the event.
 func (be busEvent) Topic() string {
 	return be.topic
 }

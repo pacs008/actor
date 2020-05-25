@@ -62,6 +62,18 @@ func (b *ActorBuilder) WithExit(exitFunc func(*Actor)) *ActorBuilder {
 	return b
 }
 
+// WithBuffer changes the buffer size from the default of 10
+// to a different size. Note: changing the buffer size will
+// absorb load spikes but will not increase performance. If
+// an actor cannot keep up with the load, use WithPool to
+// increase the number of instances.
+func (b *ActorBuilder) WithBuffer(size int) *ActorBuilder {
+	if b.err == nil && size >= 0 {
+		b.actor.mailbox = make(chan ActorMsg, size)
+	}
+	return b
+}
+
 // Private method to exclude an actor from the
 // actor system directory. Can be used to create
 // transient actors.
